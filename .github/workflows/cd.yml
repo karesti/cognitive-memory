@@ -152,7 +152,6 @@ jobs:
       
       - name: Push Docker images
         run: |
-          docker push ${{ steps.tags.outputs.main_tag }}
-          docker push ${{ steps.tags.outputs.sha_tag }}
-          docker push ${{ steps.tags.outputs.latest_tag }}
+          docker push quay.io/rigazilla/cognitive-memory:my-build
+        working-directory: cognition-processor-quarkus 
       #     # cache-to: type=gha,mode=max
