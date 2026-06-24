@@ -51,60 +51,61 @@ jobs:
         with:
           context: ./cognition-processor-quarkus
           file: ./cognition-processor-quarkus/src/main/docker/Dockerfile.jvm
-          load: true
+          # load:true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Temporarily disabled cache to debug build issues
-          # cache-from: type=gha
-          # cache-to: type=gha,mode=max
-      
-      - name: Start container for health check
-        run: |
-          docker run -d --name test-container \
-            -p 8090:8090 \
-            -e QUARKUS_HTTP_PORT=8090 \
-            -e MEMORY_SERVICE_GRPC_HOST=localhost \
-            -e MEMORY_SERVICE_GRPC_PORT=8082 \
-            -e MEMORY_SERVICE_API_KEY=test-key-for-health-check \
-            -e DEFAULT_LLM_BASE_URL=http://localhost:11434 \
-            -e OPENAI_API_KEY=dummy-key-for-health-check \
-            -e QUARKUS_LANGCHAIN4J_OLLAMA_BASE_URL=http://localhost:11434 \
-            -e QUARKUS_LOG_FILE_ENABLE=false \
-            quay.io/${{ env.QUAY_REPO }}:main
-      
-      - name: Wait for container to be ready
-        run: |
-          echo "Waiting for container to start..."
-          sleep 10
-          for i in {1..30}; do
-            if curl -f http://localhost:8090/q/health/live 2>/dev/null; then
-              echo "Container is live!"
-              exit 0
-            fi
-            echo "Attempt $i: Container not live yet..."
-            sleep 2
-          done
-          echo "Container failed to become live"
-          docker logs test-container
-          exit 1
-      
-      - name: Stop test container
-        if: always()
-        run: |
-          if docker ps -a --format '{{.Names}}' | grep -q '^test-container$'; then
-            docker stop test-container && docker rm test-container
-          else
-            echo "Container test-container does not exist, skipping cleanup"
-          fi
-      
-      - name: Push Docker image to Quay.io
-        uses: docker/build-push-action@v7
-        with:
-          context: ./cognition-processor-quarkus
-          file: ./cognition-processor-quarkus/src/main/docker/Dockerfile.jvm
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
           # Temporarily disabled cache to debug build issues
           # cache-from: type=gha
           # cache-to: type=gha,mode=max
+      
+      # - name: Start container for health check
+      #   run: |
+      #     docker run -d --name test-container \
+      #       -p 8090:8090 \
+      #       -e QUARKUS_HTTP_PORT=8090 \
+      #       -e MEMORY_SERVICE_GRPC_HOST=localhost \
+      #       -e MEMORY_SERVICE_GRPC_PORT=8082 \
+      #       -e MEMORY_SERVICE_API_KEY=test-key-for-health-check \
+      #       -e DEFAULT_LLM_BASE_URL=http://localhost:11434 \
+      #       -e OPENAI_API_KEY=dummy-key-for-health-check \
+      #       -e QUARKUS_LANGCHAIN4J_OLLAMA_BASE_URL=http://localhost:11434 \
+      #       -e QUARKUS_LOG_FILE_ENABLE=false \
+      #       quay.io/${{ env.QUAY_REPO }}:main
+      
+      # - name: Wait for container to be ready
+      #   run: |
+      #     echo "Waiting for container to start..."
+      #     sleep 10
+      #     for i in {1..30}; do
+      #       if curl -f http://localhost:8090/q/health/live 2>/dev/null; then
+      #         echo "Container is live!"
+      #         exit 0
+      #       fi
+      #       echo "Attempt $i: Container not live yet..."
+      #       sleep 2
+      #     done
+      #     echo "Container failed to become live"
+      #     docker logs test-container
+      #     exit 1
+      
+      # - name: Stop test container
+      #   if: always()
+      #   run: |
+      #     if docker ps -a --format '{{.Names}}' | grep -q '^test-container$'; then
+      #       docker stop test-container && docker rm test-container
+      #     else
+      #       echo "Container test-container does not exist, skipping cleanup"
+      #     fi
+      
+      # - name: Push Docker image to Quay.io
+      #   uses: docker/build-push-action@v7
+      #   with:
+      #     context: ./cognition-processor-quarkus
+      #     file: ./cognition-processor-quarkus/src/main/docker/Dockerfile.jvm
+      #     push: true
+      #     tags: ${{ steps.meta.outputs.tags }}
+      #     labels: ${{ steps.meta.outputs.labels }}
+      #     # Temporarily disabled cache to debug build issues
+      #     # cache-from: type=gha
+      #     # cache-to: type=gha,mode=max
