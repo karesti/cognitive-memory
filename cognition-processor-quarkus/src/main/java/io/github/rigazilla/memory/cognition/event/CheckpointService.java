@@ -103,7 +103,6 @@ public class CheckpointService {
                     next.newCall(method, callOptions)) {
                 @Override
                 public void start(Listener<RespT> responseListener, Metadata headers) {
-                    // Add authentication headers: X-API-Key and X-Client-ID
                     headers.put(Metadata.Key.of("x-api-key", Metadata.ASCII_STRING_MARSHALLER), apiKey);
                     headers.put(Metadata.Key.of("x-client-id", Metadata.ASCII_STRING_MARSHALLER), clientId);
                     super.start(responseListener, headers);

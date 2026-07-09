@@ -253,7 +253,6 @@ public class MemoryWriter {
                     next.newCall(method, callOptions)) {
                 @Override
                 public void start(Listener<RespT> responseListener, Metadata headers) {
-                    // Add authentication header
                     headers.put(Metadata.Key.of("X-API-Key", Metadata.ASCII_STRING_MARSHALLER), apiKey);
                     super.start(responseListener, headers);
                 }

@@ -159,7 +159,6 @@ public class GrpcAdminEventClient {
                 Metadata metadata = new Metadata();
                 // X-API-Key header for API key authentication
                 metadata.put(API_KEY_HEADER, apiKey);
-                // X-Client-ID header for role mapping to admin
                 metadata.put(CLIENT_ID_HEADER, clientId);
                 applier.apply(metadata);
             }

@@ -246,7 +246,6 @@ public class ProfileContextService {
                     next.newCall(method, callOptions)) {
                 @Override
                 public void start(Listener<RespT> responseListener, io.grpc.Metadata headers) {
-                    // Add authentication header
                     headers.put(io.grpc.Metadata.Key.of("X-API-Key", io.grpc.Metadata.ASCII_STRING_MARSHALLER), apiKey);
                     super.start(responseListener, headers);
                 }
