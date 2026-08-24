@@ -8,6 +8,7 @@ import io.github.chirino.memory.grpc.v1.MemoryItem;
 import io.github.chirino.memory.grpc.v1.AdminSearchMemoriesRequest;
 import io.github.chirino.memory.grpc.v1.AdminSearchMemoriesResponse;
 import java.util.stream.Collectors;
+import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.writer.MemoryWriter;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.grpc.ManagedChannel;
@@ -15,7 +16,6 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
@@ -35,15 +35,9 @@ public class ProfileContextService {
     private static final String PROFILE_CONTEXT_TYPE = "profile_context";
     private static final String LATEST_KEY = "latest";
     
-    @ConfigProperty(name = "memory-service.grpc.host")
-    String grpcHost;
-    
-    @ConfigProperty(name = "memory-service.grpc.port")
-    int grpcPort;
-    
-    @ConfigProperty(name = "memory-service.api-key")
-    String apiKey;
-    
+    @Inject
+    MemoryServiceConfig memoryService;
+
     @Inject
     ProfileConsolidationStrategy consolidationStrategy;
     
@@ -55,10 +49,13 @@ public class ProfileContextService {
     
     @PostConstruct
     void init() {
-        LOG.infof("Initializing ProfileContextService: %s:%d", grpcHost, grpcPort);
-        
+        LOG.infof("Initializing ProfileContextService: %s:%d",
+                memoryService.grpc().host(), memoryService.grpc().port());
+
         // Create gRPC channel with authentication
-        channel = GrpcChannelFactory.create(grpcHost, grpcPort, apiKey);
+        channel = GrpcChannelFactory.create(
+                memoryService.grpc().host(), memoryService.grpc().port(),
+                memoryService.apiKey());
         
         // Use admin stub for searching and writing memories on behalf of users
         memoriesStub = AdminMemoriesServiceGrpc.newBlockingStub(channel);

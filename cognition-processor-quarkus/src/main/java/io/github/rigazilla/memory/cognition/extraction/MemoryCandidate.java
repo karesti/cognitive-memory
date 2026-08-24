@@ -68,15 +68,13 @@ public record MemoryCandidate(
             && !citations.isEmpty();
     }
     
-   @Override
-   public String toString() {
-      String formattedContent = content.length() > 50 ? content.substring(0, 47) + "..." : content;
-      return "MemoryCandidate{" +
-             "type=" + type +
-             ", confidence=" + String.format(Locale.ROOT, "%.2f", confidence) +
-             ", citations=" + citations.size() +
-             ", content='" + formattedContent + '\'' +
-             ", valid=" + isValid() +
-             '}';
-   }
+    @Override
+    public String toString() {
+        return String.format(Locale.ROOT, "MemoryCandidate{type=%s, confidence=%.2f, " +
+                                          "citations=%d, content='%s', " +
+                                          "valid=%s}",
+            type, confidence, citations.size(),
+            content.length() > 50 ? content.substring(0, 47) + "..." : content,
+            isValid());
+    }
 }

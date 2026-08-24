@@ -1,8 +1,8 @@
 package io.github.rigazilla.memory.cognition.event;
 
+import io.github.rigazilla.memory.cognition.config.CognitionConfig;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
@@ -35,18 +35,9 @@ public class DirtyWindowRegistry {
     // Lock for promotion operations
     private final ReentrantLock promotionLock = new ReentrantLock();
     
-    @ConfigProperty(name = "cognition.scheduler.debounce-delay", defaultValue = "PT1M")
-    Duration debounceDelay;
-    
-    @ConfigProperty(name = "cognition.scheduler.max-batch-age", defaultValue = "PT5M")
-    Duration maxBatchAge;
-    
-    @ConfigProperty(name = "cognition.scheduler.max-batch-entries", defaultValue = "24")
-    int maxBatchEntries;
-    
-    @ConfigProperty(name = "cognition.scheduler.max-checkpoint-windows", defaultValue = "1000")
-    int maxCheckpointWindows;
-    
+    @Inject
+    CognitionConfig cognition;
+
     @Inject
     ScopeJobDispatcher jobDispatcher;
     
@@ -61,6 +52,7 @@ public class DirtyWindowRegistry {
      * @return true if a window was promoted due to max entries
      */
     public boolean acceptEvent(String conversationId, String eventCursor, String entryId, Instant observedAt) {
+        int maxCheckpointWindows = cognition.scheduler().maxCheckpointWindows();
         // Check if we're at capacity
         while (windows.size() >= maxCheckpointWindows) {
             LOG.warnf("Checkpoint window limit reached (%d), promoting oldest due window", maxCheckpointWindows);
@@ -84,7 +76,7 @@ public class DirtyWindowRegistry {
                 // Create new window
                 DirtyWindow newWindow = new DirtyWindow(
                         conversationId, eventCursor, entryId,
-                        observedAt, debounceDelay, previousEntryId);
+                        observedAt, cognition.scheduler().debounceDelay(), previousEntryId);
 
                 LOG.debugf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                 LOG.debugf("Window Created");
@@ -95,7 +87,7 @@ public class DirtyWindowRegistry {
                         previousEntryId != null ? previousEntryId : "(none - first window)");
                 LOG.debugf("  Observed At:        %s", observedAt);
                 LOG.debugf("  Due At:             %s", newWindow.getDueAt());
-                LOG.debugf("  Debounce Delay:     %s", debounceDelay);
+                LOG.debugf("  Debounce Delay:     %s", cognition.scheduler().debounceDelay());
                 LOG.debugf("  Initial Event Count: 1");
                 LOG.debugf("  Initial Entry Count: %d", entryId != null ? 1 : 0);
                 LOG.debugf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -122,9 +114,9 @@ public class DirtyWindowRegistry {
                 LOG.debugf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
                 // Check if we should promote immediately due to max entries
-                if (existing.isMaxEntriesReached(maxBatchEntries)) {
+                if (existing.isMaxEntriesReached(cognition.scheduler().maxBatchEntries())) {
                     LOG.infof("Window for conversation %s reached max entries (%d), promoting immediately",
-                             conversationId, maxBatchEntries);
+                             conversationId, cognition.scheduler().maxBatchEntries());
                     promoted[0] = true;
                     windowToPromote[0] = existing;  // Save reference before removing
                     return null; // Remove from map, will be promoted
@@ -183,12 +175,12 @@ public class DirtyWindowRegistry {
         }
         
         // Trigger 2: Max batch age reached
-        if (window.isMaxAgeReached(now, maxBatchAge)) {
+        if (window.isMaxAgeReached(now, cognition.scheduler().maxBatchAge())) {
             return true;
         }
-        
+
         // Trigger 3: Max batch entries reached
-        if (window.isMaxEntriesReached(maxBatchEntries)) {
+        if (window.isMaxEntriesReached(cognition.scheduler().maxBatchEntries())) {
             return true;
         }
         
@@ -199,9 +191,9 @@ public class DirtyWindowRegistry {
      * Determine which trigger condition caused promotion.
      */
     private String determinePromotionTrigger(DirtyWindow window, Instant now) {
-        if (window.isMaxEntriesReached(maxBatchEntries)) {
+        if (window.isMaxEntriesReached(cognition.scheduler().maxBatchEntries())) {
             return "max_batch_entries";
-        } else if (window.isMaxAgeReached(now, maxBatchAge)) {
+        } else if (window.isMaxAgeReached(now, cognition.scheduler().maxBatchAge())) {
             return "max_batch_age";
         } else if (window.isDue(now)) {
             return "debounce_delay";

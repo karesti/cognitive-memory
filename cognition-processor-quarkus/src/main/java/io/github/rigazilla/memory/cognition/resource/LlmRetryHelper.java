@@ -1,7 +1,8 @@
 package io.github.rigazilla.memory.cognition.resource;
 
+import io.github.rigazilla.memory.cognition.config.CognitionConfig;
 import jakarta.enterprise.context.ApplicationScoped;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.function.Supplier;
@@ -29,14 +30,13 @@ public class LlmRetryHelper {
 
     private static final Logger LOG = Logger.getLogger(LlmRetryHelper.class);
 
-    @ConfigProperty(name = "cognition.llm.retry.max-attempts", defaultValue = "3")
-    int maxAttempts;
+    @Inject
+    CognitionConfig cognition;
 
-    @ConfigProperty(name = "cognition.llm.retry.initial-delay-ms", defaultValue = "1000")
-    long initialDelayMs;
-
-    @ConfigProperty(name = "cognition.llm.retry.max-delay-ms", defaultValue = "30000")
-    long maxDelayMs;
+    // Package-private fields for forTesting() override (no CDI required in unit tests)
+    int maxAttemptsOverride = -1;
+    long initialDelayMsOverride = -1;
+    long maxDelayMsOverride = -1;
 
     /**
      * Create a pre-configured instance for use in unit tests (no CDI required).
@@ -44,9 +44,9 @@ public class LlmRetryHelper {
      */
     public static LlmRetryHelper forTesting(int maxAttempts, long initialDelayMs, long maxDelayMs) {
         LlmRetryHelper h = new LlmRetryHelper();
-        h.maxAttempts = maxAttempts;
-        h.initialDelayMs = initialDelayMs;
-        h.maxDelayMs = maxDelayMs;
+        h.maxAttemptsOverride = maxAttempts;
+        h.initialDelayMsOverride = initialDelayMs;
+        h.maxDelayMsOverride = maxDelayMs;
         return h;
     }
 
@@ -60,8 +60,18 @@ public class LlmRetryHelper {
      * @throws RuntimeException the last exception if all attempts fail
      */
     public <T> T withRetry(String description, Supplier<T> action) {
-        int attempts = maxAttempts < 1 ? 1 : maxAttempts;
-        long delayMs = initialDelayMs;
+        int configuredAttempts = maxAttemptsOverride >= 0
+                ? maxAttemptsOverride
+                : (cognition != null ? cognition.llm().retry().maxAttempts() : 3);
+        long configuredInitialDelay = initialDelayMsOverride >= 0
+                ? initialDelayMsOverride
+                : (cognition != null ? cognition.llm().retry().initialDelayMs() : 1000L);
+        long configuredMaxDelay = maxDelayMsOverride >= 0
+                ? maxDelayMsOverride
+                : (cognition != null ? cognition.llm().retry().maxDelayMs() : 30000L);
+
+        int attempts = configuredAttempts < 1 ? 1 : configuredAttempts;
+        long delayMs = configuredInitialDelay;
         RuntimeException lastException = null;
 
         for (int attempt = 1; attempt <= attempts; attempt++) {
@@ -73,7 +83,7 @@ public class LlmRetryHelper {
                     LOG.warnf("LLM call failed [%s] attempt %d/%d: %s — retrying in %dms",
                             description, attempt, attempts, e.getMessage(), delayMs);
                     sleep(delayMs);
-                    delayMs = Math.min(delayMs * 2, maxDelayMs);
+                    delayMs = Math.min(delayMs * 2, configuredMaxDelay);
                 } else {
                     LOG.errorf(e, "LLM call failed [%s] after %d attempt(s), giving up",
                             description, attempts);

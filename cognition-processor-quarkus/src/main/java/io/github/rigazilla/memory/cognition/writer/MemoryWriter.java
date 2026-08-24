@@ -12,6 +12,7 @@ import io.github.chirino.memory.grpc.v1.AdminMemoriesServiceGrpc;
 import io.github.chirino.memory.grpc.v1.AdminPutMemoryRequest;
 import io.github.rigazilla.memory.cognition.consolidation.ResolvedCandidate;
 import io.github.rigazilla.memory.cognition.extraction.MemoryCandidate;
+import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.github.rigazilla.memory.cognition.model.Provenance;
 import io.grpc.ManagedChannel;
@@ -20,7 +21,7 @@ import io.grpc.StatusRuntimeException;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.nio.ByteBuffer;
@@ -37,24 +38,21 @@ public class MemoryWriter {
     private static final Logger LOG = Logger.getLogger(MemoryWriter.class);
     private static final String COGNITION_VERSION = "cognition.v1";
     
-    @ConfigProperty(name = "memory-service.grpc.host")
-    String grpcHost;
-    
-    @ConfigProperty(name = "memory-service.grpc.port")
-    int grpcPort;
-    
-    @ConfigProperty(name = "memory-service.api-key")
-    String apiKey;
-    
+    @Inject
+    MemoryServiceConfig memoryService;
+
     ManagedChannel channel;
     AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub memoriesStub;
     
     @PostConstruct
     void init() {
-        LOG.infof("Initializing MemoryWriter: %s:%d", grpcHost, grpcPort);
-        
+        LOG.infof("Initializing MemoryWriter: %s:%d",
+                memoryService.grpc().host(), memoryService.grpc().port());
+
         // Create gRPC channel with authentication interceptor
-        channel = GrpcChannelFactory.create(grpcHost, grpcPort, apiKey);
+        channel = GrpcChannelFactory.create(
+                memoryService.grpc().host(), memoryService.grpc().port(),
+                memoryService.apiKey());
         
         // Create admin stub for writing memories on behalf of users
         memoriesStub = AdminMemoriesServiceGrpc.newBlockingStub(channel);

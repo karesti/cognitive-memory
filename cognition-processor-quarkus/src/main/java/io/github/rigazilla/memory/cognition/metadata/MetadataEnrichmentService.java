@@ -11,6 +11,8 @@ import io.github.chirino.memory.grpc.v1.AdminMemoryItem;
 import io.github.chirino.memory.grpc.v1.AdminPutMemoryRequest;
 import io.github.chirino.memory.grpc.v1.MemoryNamespace;
 import io.grpc.ManagedChannel;
+import io.github.rigazilla.memory.cognition.config.CognitionConfig;
+import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.github.rigazilla.memory.cognition.resource.LlmRetryHelper;
 import io.quarkus.arc.Arc;
@@ -19,7 +21,6 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
@@ -43,23 +44,17 @@ public class MetadataEnrichmentService {
     private static final String COGNITION_VERSION = "cognition.v1";
     private static final String PROFILE_CONTEXT_TYPE = "profile_context";
 
-    @ConfigProperty(name = "memory-service.grpc.host")
-    String grpcHost;
+    @Inject
+    MemoryServiceConfig memoryService;
 
-    @ConfigProperty(name = "memory-service.grpc.port")
-    int grpcPort;
-
-    @ConfigProperty(name = "memory-service.api-key")
-    String apiKey;
+    @Inject
+    CognitionConfig cognition;
 
     @Inject
     MetadataExtractor extractor;
 
     @Inject
     LlmRetryHelper llmRetryHelper;
-
-    @ConfigProperty(name = "cognition.llm.backfill.inter-call-delay-ms", defaultValue = "0")
-    long interCallDelayMs;
 
     // Package-private for test injection (same pattern as TemporalMetadataEnrichmentService)
     ManagedChannel channel;
@@ -76,8 +71,11 @@ public class MetadataEnrichmentService {
 
     @PostConstruct
     void init() {
-        LOG.infof("Initializing MetadataEnrichmentService: %s:%d", grpcHost, grpcPort);
-        channel = GrpcChannelFactory.create(grpcHost, grpcPort, apiKey);
+        LOG.infof("Initializing MetadataEnrichmentService: %s:%d",
+                memoryService.grpc().host(), memoryService.grpc().port());
+        channel = GrpcChannelFactory.create(
+                memoryService.grpc().host(), memoryService.grpc().port(),
+                memoryService.apiKey());
         memoriesStub = AdminMemoriesServiceGrpc.newBlockingStub(channel);
         LOG.info("MetadataEnrichmentService initialized successfully");
     }
@@ -316,11 +314,12 @@ public class MetadataEnrichmentService {
     }
 
     private void sleepInterCallDelay() {
-        if (interCallDelayMs <= 0) {
+        long delay = cognition.llm().backfill().interCallDelayMs();
+        if (delay <= 0) {
             return;
         }
         try {
-            Thread.sleep(interCallDelayMs);
+            Thread.sleep(delay);
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
         }
