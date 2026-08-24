@@ -8,6 +8,9 @@ import io.github.chirino.memory.grpc.v1.PutCheckpointRequest;
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.quarkus.arc.Arc;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -21,7 +24,10 @@ import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for CheckpointService.
- * 
+ *
+ * Uses @QuarkusTest so CDI wires MemoryServiceConfig from test/resources/application.properties.
+ * The gRPC stub and channel are replaced with mocks in @BeforeEach to avoid real network calls.
+ *
  * Tests cover:
  * - Checkpoint loading (success, not found, errors)
  * - Checkpoint saving (success, retry logic, errors)
@@ -29,25 +35,28 @@ import static org.mockito.Mockito.*;
  * - Error handling for various gRPC status codes
  * - CheckpointState record validation
  */
+@QuarkusTest
 class CheckpointServiceTest {
 
-    private CheckpointService service;
+    @Inject
+    CheckpointService service;
+
+    /** The real (non-proxy) bean instance — used for field injection of mock stubs. */
+    private CheckpointService realService;
+
     private AdminCheckpointServiceGrpc.AdminCheckpointServiceBlockingStub mockStub;
-    private ManagedChannel mockChannel;
 
     @BeforeEach
     void setUp() {
-        service = new CheckpointService();
         mockStub = mock(AdminCheckpointServiceGrpc.AdminCheckpointServiceBlockingStub.class);
-        mockChannel = mock(ManagedChannel.class);
+        ManagedChannel mockChannel = mock(ManagedChannel.class);
 
-        // Inject mocks
-        service.checkpointStub = mockStub;
-        service.channel = mockChannel;
-        service.grpcHost = "localhost";
-        service.grpcPort = 8082;
-        service.apiKey = "test-key";
-        service.clientId = "test-client";
+        // Unwrap CDI proxy to reach the real bean instance — field assignment on the proxy
+        // itself is a no-op because @ApplicationScoped beans are wrapped in client proxies.
+        // arc_contextualInstance() returns the actual delegate, not the proxy shell.
+        realService = (CheckpointService) ((io.quarkus.arc.ClientProxy) service).arc_contextualInstance();
+        realService.checkpointStub = mockStub;
+        realService.channel = mockChannel;
     }
 
     @Test

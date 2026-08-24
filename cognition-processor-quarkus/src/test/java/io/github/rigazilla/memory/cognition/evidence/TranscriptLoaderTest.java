@@ -11,6 +11,9 @@ import io.github.chirino.memory.grpc.v1.ListEntriesResponse;
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.quarkus.arc.Arc;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -33,24 +36,28 @@ import static org.mockito.Mockito.*;
  * - Error handling
  * - Text extraction from different entry formats
  */
+@QuarkusTest
 class TranscriptLoaderTest {
 
-    private TranscriptLoader loader;
+    @Inject
+    TranscriptLoader loader;
+
+    /** The real (non-proxy) bean instance — used for field injection of mock stubs. */
+    private TranscriptLoader realLoader;
+
     private AdminEntriesServiceGrpc.AdminEntriesServiceBlockingStub mockEntriesStub;
-    private ManagedChannel mockChannel;
 
     @BeforeEach
     void setUp() {
-        loader = new TranscriptLoader();
         mockEntriesStub = mock(AdminEntriesServiceGrpc.AdminEntriesServiceBlockingStub.class);
-        mockChannel = mock(ManagedChannel.class);
+        ManagedChannel mockChannel = mock(ManagedChannel.class);
 
-        // Inject mocks
-        loader.entriesStub = mockEntriesStub;
-        loader.channel = mockChannel;
-        loader.grpcHost = "localhost";
-        loader.grpcPort = 8082;
-        loader.apiKey = "test-key";
+        // Unwrap CDI proxy to reach the real bean instance — field assignment on the proxy
+        // itself is a no-op because @ApplicationScoped beans are wrapped in client proxies.
+        // arc_contextualInstance() returns the actual delegate, not the proxy shell.
+        realLoader = (TranscriptLoader) ((io.quarkus.arc.ClientProxy) loader).arc_contextualInstance();
+        realLoader.entriesStub = mockEntriesStub;
+        realLoader.channel = mockChannel;
     }
 
     @Test

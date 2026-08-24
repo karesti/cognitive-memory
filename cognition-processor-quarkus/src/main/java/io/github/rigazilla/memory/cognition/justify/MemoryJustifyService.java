@@ -9,6 +9,7 @@ import io.github.chirino.memory.grpc.v1.AdminGetMemoryRequest;
 import io.github.chirino.memory.grpc.v1.AdminMemoriesServiceGrpc;
 import io.github.chirino.memory.grpc.v1.AdminMemoryItem;
 import io.github.chirino.memory.grpc.v1.Entry;
+import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
@@ -16,7 +17,7 @@ import io.grpc.StatusRuntimeException;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.nio.ByteBuffer;
@@ -35,28 +36,22 @@ public class MemoryJustifyService {
     
     private static final Logger LOG = Logger.getLogger(MemoryJustifyService.class);
     
-    @ConfigProperty(name = "memory-service.grpc.host")
-    String grpcHost;
-    
-    @ConfigProperty(name = "memory-service.grpc.port")
-    int grpcPort;
-    
-    @ConfigProperty(name = "memory-service.api-key")
-    String apiKey;
-    
-    @ConfigProperty(name = "memory-service.client-id")
-    String clientId;
-    
+    @Inject
+    MemoryServiceConfig memoryService;
+
     ManagedChannel channel;
     AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub memoriesStub;
     AdminEntriesServiceGrpc.AdminEntriesServiceBlockingStub entriesStub;
     
     @PostConstruct
     void init() {
-        LOG.infof("Initializing MemoryJustifyService: %s:%d", grpcHost, grpcPort);
-        
+        LOG.infof("Initializing MemoryJustifyService: %s:%d",
+                memoryService.grpc().host(), memoryService.grpc().port());
+
         // Create gRPC channel with authentication interceptor
-        channel = GrpcChannelFactory.create(grpcHost, grpcPort, apiKey, clientId);
+        channel = GrpcChannelFactory.create(
+                memoryService.grpc().host(), memoryService.grpc().port(),
+                memoryService.apiKey(), memoryService.clientId());
         
         memoriesStub = AdminMemoriesServiceGrpc.newBlockingStub(channel);
         entriesStub = AdminEntriesServiceGrpc.newBlockingStub(channel);

@@ -7,12 +7,13 @@ import io.github.chirino.memory.grpc.v1.Channel;
 import io.github.chirino.memory.grpc.v1.Entry;
 import io.github.chirino.memory.grpc.v1.ListEntriesResponse;
 import io.github.chirino.memory.grpc.v1.PageRequest;
+import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.grpc.ManagedChannel;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.nio.ByteBuffer;
@@ -28,24 +29,21 @@ public class TranscriptLoader {
 
     private static final Logger LOG = Logger.getLogger(TranscriptLoader.class);
 
-    @ConfigProperty(name = "memory-service.grpc.host")
-    String grpcHost;
-
-    @ConfigProperty(name = "memory-service.grpc.port")
-    int grpcPort;
-
-    @ConfigProperty(name = "memory-service.api-key")
-    String apiKey;
+    @Inject
+    MemoryServiceConfig memoryService;
 
     ManagedChannel channel;
     AdminEntriesServiceGrpc.AdminEntriesServiceBlockingStub entriesStub;
     
     @PostConstruct
     void init() {
-        LOG.infof("Initializing TranscriptLoader: %s:%d", grpcHost, grpcPort);
-        
+        LOG.infof("Initializing TranscriptLoader: %s:%d",
+                memoryService.grpc().host(), memoryService.grpc().port());
+
         // Create gRPC channel with authentication interceptor
-        channel = GrpcChannelFactory.create(grpcHost, grpcPort, apiKey);
+        channel = GrpcChannelFactory.create(
+                memoryService.grpc().host(), memoryService.grpc().port(),
+                memoryService.apiKey());
 
         // Create admin stub (no on-behalf-of needed, admin has full access)
         entriesStub = AdminEntriesServiceGrpc.newBlockingStub(channel);

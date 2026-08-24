@@ -14,6 +14,9 @@ import io.github.rigazilla.memory.cognition.model.Provenance;
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.quarkus.arc.Arc;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -29,7 +32,10 @@ import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for MemoryWriter.
- * 
+ *
+ * Uses @QuarkusTest so CDI wires MemoryServiceConfig from test/resources/application.properties.
+ * The gRPC stub and channel are replaced with mocks in @BeforeEach to avoid real network calls.
+ *
  * Tests cover:
  * - Single and batch memory writing
  * - Namespace construction
@@ -37,27 +43,31 @@ import static org.mockito.Mockito.*;
  * - Error handling
  * - UUID conversion
  */
+@QuarkusTest
 class MemoryWriterTest {
 
     /** Fixture observed_at used wherever writeMemory/writeMemories requires a timestamp string. */
     private static final String TEST_OBSERVED_AT = "2025-01-15T10:00:00Z";
 
-    private MemoryWriter writer;
+    @Inject
+    MemoryWriter writer;
+
+    /** The real (non-proxy) bean instance — used for field injection of mock stubs. */
+    private MemoryWriter realWriter;
+
     private AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub mockMemoriesStub;
-    private ManagedChannel mockChannel;
 
     @BeforeEach
     void setUp() {
-        writer = new MemoryWriter();
         mockMemoriesStub = mock(AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub.class);
-        mockChannel = mock(ManagedChannel.class);
+        ManagedChannel mockChannel = mock(ManagedChannel.class);
 
-        // Inject mocks
-        writer.memoriesStub = mockMemoriesStub;
-        writer.channel = mockChannel;
-        writer.grpcHost = "localhost";
-        writer.grpcPort = 8082;
-        writer.apiKey = "test-key";
+        // Unwrap CDI proxy to reach the real bean instance — field assignment on the proxy
+        // itself is a no-op because @ApplicationScoped beans are wrapped in client proxies.
+        // arc_contextualInstance() returns the actual delegate, not the proxy shell.
+        realWriter = (MemoryWriter) ((io.quarkus.arc.ClientProxy) writer).arc_contextualInstance();
+        realWriter.memoriesStub = mockMemoriesStub;
+        realWriter.channel = mockChannel;
     }
 
     @Test

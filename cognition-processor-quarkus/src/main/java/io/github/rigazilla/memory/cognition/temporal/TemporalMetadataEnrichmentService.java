@@ -9,6 +9,7 @@ import io.github.chirino.memory.grpc.v1.AdminListMemoriesResponse;
 import io.github.chirino.memory.grpc.v1.AdminMemoriesServiceGrpc;
 import io.github.chirino.memory.grpc.v1.AdminMemoryItem;
 import io.github.chirino.memory.grpc.v1.AdminPutMemoryRequest;
+import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
@@ -16,7 +17,7 @@ import io.grpc.StatusRuntimeException;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
@@ -47,17 +48,8 @@ public class TemporalMetadataEnrichmentService {
     /** Page size used when listing memories for backfill. */
     private static final int PAGE_SIZE = 100;
 
-    @ConfigProperty(name = "memory-service.grpc.host")
-    String grpcHost;
-
-    @ConfigProperty(name = "memory-service.grpc.port")
-    int grpcPort;
-
-    @ConfigProperty(name = "memory-service.api-key")
-    String apiKey;
-
-    @ConfigProperty(name = "memory-service.client-id")
-    String clientId;
+    @Inject
+    MemoryServiceConfig memoryService;
 
     ManagedChannel channel;
     AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub memoriesStub;
@@ -98,8 +90,11 @@ public class TemporalMetadataEnrichmentService {
 
     @PostConstruct
     void init() {
-        LOG.infof("Initializing TemporalMetadataEnrichmentService: %s:%d", grpcHost, grpcPort);
-        channel = GrpcChannelFactory.create(grpcHost, grpcPort, apiKey, clientId);
+        LOG.infof("Initializing TemporalMetadataEnrichmentService: %s:%d",
+                memoryService.grpc().host(), memoryService.grpc().port());
+        channel = GrpcChannelFactory.create(
+                memoryService.grpc().host(), memoryService.grpc().port(),
+                memoryService.apiKey(), memoryService.clientId());
         memoriesStub = AdminMemoriesServiceGrpc.newBlockingStub(channel);
         LOG.info("TemporalMetadataEnrichmentService initialized successfully");
     }

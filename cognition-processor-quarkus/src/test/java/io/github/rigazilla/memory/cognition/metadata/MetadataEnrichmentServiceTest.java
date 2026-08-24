@@ -7,7 +7,12 @@ import io.github.chirino.memory.grpc.v1.AdminListMemoriesResponse;
 import io.github.chirino.memory.grpc.v1.AdminMemoriesServiceGrpc;
 import io.github.chirino.memory.grpc.v1.AdminMemoryItem;
 import io.github.chirino.memory.grpc.v1.AdminPutMemoryRequest;
+import io.github.rigazilla.memory.cognition.resource.LlmRetryHelper;
 import io.grpc.ManagedChannel;
+import io.quarkus.arc.Arc;
+import io.quarkus.test.InjectMock;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -41,12 +46,19 @@ import static org.mockito.Mockito.*;
  *   <li>Empty extractor response (no entities / no topics) still calls putMemory</li>
  * </ul>
  */
+@QuarkusTest
 class MetadataEnrichmentServiceTest {
 
-    private MetadataEnrichmentService service;
+    @Inject
+    MetadataEnrichmentService service;
+
+    /** The real (non-proxy) bean instance — used for field injection of mock stubs. */
+    private MetadataEnrichmentService realService;
+
+    @InjectMock
+    MetadataExtractor mockExtractor;
+
     private AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub mockStub;
-    private ManagedChannel mockChannel;
-    private MetadataExtractor mockExtractor;
 
     /** Default extraction response used for most happy-path tests. */
     private static final MetadataExtractionResponse DEFAULT_RESPONSE = new MetadataExtractionResponse(
@@ -60,22 +72,25 @@ class MetadataEnrichmentServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new MetadataEnrichmentService();
         mockStub = mock(AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub.class);
-        mockChannel = mock(ManagedChannel.class);
-        mockExtractor = mock(MetadataExtractor.class);
+        ManagedChannel mockChannel = mock(ManagedChannel.class);
 
-        // Inject dependencies without CDI
-        service.memoriesStub = mockStub;
-        service.channel = mockChannel;
-        service.grpcHost = "localhost";
-        service.grpcPort = 8082;
-        service.apiKey = "test-key";
-        service.extractor = mockExtractor;
-        // Wire a real LlmRetryHelper with 1 attempt (no actual retries) for unit tests.
-        // Tests that specifically exercise retry set maxAttempts directly.
-        service.llmRetryHelper = retryHelperWithAttempts(1);
-        service.interCallDelayMs = 0;
+        // Unwrap CDI proxy to reach the real bean instance — field assignment on the proxy
+        // itself is a no-op because @ApplicationScoped beans are wrapped in client proxies.
+        // arc_contextualInstance() returns the actual delegate, not the proxy shell.
+        realService = (MetadataEnrichmentService)
+                ((io.quarkus.arc.ClientProxy) service).arc_contextualInstance();
+        realService.memoriesStub = mockStub;
+        realService.channel = mockChannel;
+        // Use a fast no-retry helper so unit tests run instantly
+        realService.llmRetryHelper = LlmRetryHelper.forTesting(1, 0L, 0L);
+        // Reset counters/flags so tests are independent of execution order
+        realService.processed.set(0);
+        realService.enriched.set(0);
+        realService.errors.set(0);
+        realService.running.set(false);
+        realService.status.set("idle");
+        realService.lastRunTime.set(null);
 
         when(mockExtractor.extract(any(), any())).thenReturn(DEFAULT_RESPONSE);
     }
@@ -86,9 +101,9 @@ class MetadataEnrichmentServiceTest {
 
     @Test
     void allCountersStartAtZero() {
-        assertEquals(0, service.processed.get());
-        assertEquals(0, service.enriched.get());
-        assertEquals(0, service.errors.get());
+        assertEquals(0, realService.processed.get());
+        assertEquals(0, realService.enriched.get());
+        assertEquals(0, realService.errors.get());
     }
 
     // -------------------------------------------------------------------------
@@ -106,9 +121,9 @@ class MetadataEnrichmentServiceTest {
         service.runEnrichment(null);
 
         verify(mockStub).putMemory(any());
-        assertEquals(1, service.processed.get());
-        assertEquals(1, service.enriched.get());
-        assertEquals(0, service.errors.get());
+        assertEquals(1, realService.processed.get());
+        assertEquals(1, realService.enriched.get());
+        assertEquals(0, realService.errors.get());
     }
 
     @Test
@@ -254,8 +269,8 @@ class MetadataEnrichmentServiceTest {
 
         verify(mockStub, never()).putMemory(any());
         verify(mockExtractor, never()).extract(any(), any());
-        assertEquals(1, service.processed.get(), "processed must be incremented even for skipped items");
-        assertEquals(0, service.enriched.get());
+        assertEquals(1, realService.processed.get(), "processed must be incremented even for skipped items");
+        assertEquals(0, realService.enriched.get());
     }
 
     // -------------------------------------------------------------------------
@@ -274,8 +289,8 @@ class MetadataEnrichmentServiceTest {
 
         verify(mockStub, never()).putMemory(any());
         verify(mockExtractor, never()).extract(any(), any());
-        assertEquals(1, service.processed.get());
-        assertEquals(0, service.enriched.get());
+        assertEquals(1, realService.processed.get());
+        assertEquals(0, realService.enriched.get());
     }
 
     @Test
@@ -310,7 +325,7 @@ class MetadataEnrichmentServiceTest {
         service.runEnrichment(null);
 
         verify(mockStub).putMemory(any());
-        assertEquals(1, service.enriched.get(),
+        assertEquals(1, realService.enriched.get(),
                 "enrichment with empty extraction is still a write — counter must increment");
     }
 
@@ -364,8 +379,8 @@ class MetadataEnrichmentServiceTest {
 
         service.runEnrichment(null);
 
-        assertEquals(2, service.processed.get(), "both pages must be processed");
-        assertEquals(2, service.enriched.get(), "both items must be enriched");
+        assertEquals(2, realService.processed.get(), "both pages must be processed");
+        assertEquals(2, realService.enriched.get(), "both items must be enriched");
         verify(mockStub, times(2)).listMemories(any());
     }
 
@@ -413,9 +428,9 @@ class MetadataEnrichmentServiceTest {
 
         service.runEnrichment(null);
 
-        assertEquals(2, service.processed.get());
-        assertEquals(1, service.enriched.get(), "second item must succeed despite first failing");
-        assertEquals(1, service.errors.get(), "failure must increment errors counter");
+        assertEquals(2, realService.processed.get());
+        assertEquals(1, realService.enriched.get(), "second item must succeed despite first failing");
+        assertEquals(1, realService.errors.get(), "failure must increment errors counter");
     }
 
     @Test
@@ -431,8 +446,8 @@ class MetadataEnrichmentServiceTest {
 
         assertDoesNotThrow(() -> service.runEnrichment(null),
                 "extractor failure must be caught and not propagate");
-        assertEquals(1, service.errors.get());
-        assertEquals(0, service.enriched.get());
+        assertEquals(1, realService.errors.get());
+        assertEquals(0, realService.enriched.get());
     }
 
     // -------------------------------------------------------------------------
@@ -442,7 +457,7 @@ class MetadataEnrichmentServiceTest {
     @Test
     void startEnrichmentAsyncSkipsWhenAlreadyRunning() {
         // Force the AtomicBoolean guard to true before calling startEnrichmentAsync
-        service.running.set(true);
+        realService.running.set(true);
 
         service.startEnrichmentAsync();
 
@@ -453,9 +468,9 @@ class MetadataEnrichmentServiceTest {
     @Test
     void runEnrichmentResetsCounters() {
         // Seed stale values from a previous imaginary run
-        service.processed.set(99);
-        service.enriched.set(88);
-        service.errors.set(77);
+        realService.processed.set(99);
+        realService.enriched.set(88);
+        realService.errors.set(77);
 
         when(mockStub.listNamespaces(any())).thenReturn(emptyNamespacesResponse());
 
@@ -463,9 +478,9 @@ class MetadataEnrichmentServiceTest {
         // TemporalMetadataEnrichmentServiceTest.runBackfillResetsCountersAtStart()
         service.runEnrichment(null);
 
-        assertEquals(0, service.processed.get(), "processed must be reset at run start");
-        assertEquals(0, service.enriched.get(), "enriched must be reset at run start");
-        assertEquals(0, service.errors.get(), "errors must be reset at run start");
+        assertEquals(0, realService.processed.get(), "processed must be reset at run start");
+        assertEquals(0, realService.enriched.get(), "enriched must be reset at run start");
+        assertEquals(0, realService.errors.get(), "errors must be reset at run start");
     }
 
     @Test
@@ -475,14 +490,14 @@ class MetadataEnrichmentServiceTest {
         service.startEnrichmentAsync();
 
         long deadline = System.currentTimeMillis() + 5000;
-        while (!"completed".equals(service.status.get())
+        while (!"completed".equals(realService.status.get())
                 && System.currentTimeMillis() < deadline) {
             Thread.sleep(10);
         }
 
-        assertEquals("completed", service.status.get(),
+        assertEquals("completed", realService.status.get(),
                 "status must be 'completed' after successful run — timed out waiting");
-        assertNotNull(service.lastRunTime.get(), "lastRunTime must be set after completion");
+        assertNotNull(realService.lastRunTime.get(), "lastRunTime must be set after completion");
     }
 
     // -------------------------------------------------------------------------
@@ -491,9 +506,9 @@ class MetadataEnrichmentServiceTest {
 
     @Test
     void accessorsReflectCurrentAtomicValues() {
-        service.processed.set(5);
-        service.enriched.set(3);
-        service.errors.set(1);
+        realService.processed.set(5);
+        realService.enriched.set(3);
+        realService.errors.set(1);
 
         assertEquals(5, service.getProcessed());
         assertEquals(3, service.getEnriched());
@@ -503,7 +518,7 @@ class MetadataEnrichmentServiceTest {
     @Test
     void getStatusReturnsCurrentStatus() {
         assertEquals("idle", service.getStatus());
-        service.status.set("running");
+        realService.status.set("running");
         assertEquals("running", service.getStatus());
     }
 
@@ -529,15 +544,15 @@ class MetadataEnrichmentServiceTest {
         when(mockStub.listMemories(any())).thenReturn(singlePage(item));
 
         // Use a helper with 2 attempts and 0ms delay so the test runs instantly.
-        service.llmRetryHelper = retryHelperWithAttempts(2);
+        realService.llmRetryHelper = retryHelperWithAttempts(2);
 
         service.runEnrichment(null);
 
         // extractor should have been called twice (first fails, second succeeds).
         verify(mockExtractor, times(2)).extract(any(), any());
         verify(mockStub).putMemory(any());
-        assertEquals(1, service.enriched.get());
-        assertEquals(0, service.errors.get());
+        assertEquals(1, realService.enriched.get());
+        assertEquals(0, realService.errors.get());
     }
 
     @Test
@@ -552,14 +567,14 @@ class MetadataEnrichmentServiceTest {
         when(mockStub.listMemories(any())).thenReturn(singlePage(item));
 
         // Use a helper with 2 attempts and 0ms delay.
-        service.llmRetryHelper = retryHelperWithAttempts(2);
+        realService.llmRetryHelper = retryHelperWithAttempts(2);
 
         service.runEnrichment(null);
 
         // extractor called twice (all attempts exhausted).
         verify(mockExtractor, times(2)).extract(any(), any());
-        assertEquals(0, service.enriched.get());
-        assertEquals(1, service.errors.get());
+        assertEquals(0, realService.enriched.get());
+        assertEquals(1, realService.errors.get());
     }
 
     @Test
@@ -572,11 +587,11 @@ class MetadataEnrichmentServiceTest {
                 namespacesResponse("user", "user-abc", "cognition.v1", "fact"));
         when(mockStub.listMemories(any())).thenReturn(twoItemPage(item1, item2));
 
-        service.interCallDelayMs = 0; // no actual sleep — just verifying the path runs cleanly
+        // interCallDelayMs is 0 in test/resources/application.properties — no sleep needed
         service.runEnrichment(null);
 
-        assertEquals(2, service.enriched.get());
-        assertEquals(0, service.errors.get());
+        assertEquals(2, realService.enriched.get());
+        assertEquals(0, realService.errors.get());
     }
 
     // -------------------------------------------------------------------------
@@ -621,7 +636,7 @@ class MetadataEnrichmentServiceTest {
 
         verify(mockStub, never()).listNamespaces(any());
         verify(mockStub).listMemories(any());
-        assertEquals(1, service.enriched.get(),
+        assertEquals(1, realService.enriched.get(),
                 "item must be enriched when a fully-qualified prefix is supplied");
     }
 
@@ -632,7 +647,7 @@ class MetadataEnrichmentServiceTest {
 
         verify(mockStub, never()).listNamespaces(any());
         verify(mockStub, never()).listMemories(any());
-        assertEquals(0, service.processed.get(),
+        assertEquals(0, realService.processed.get(),
                 "profile_context namespace must not be enriched even when directly targeted");
     }
 

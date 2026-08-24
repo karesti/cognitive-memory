@@ -59,6 +59,72 @@ When adding a new managed cognitive process:
 
 Do not require runtime `details` for every process. If a process has no meaningful live operational data yet, it can expose empty or minimal inspection details.
 
+## Testing
+
+Use **`@QuarkusTest`** for all tests involving CDI beans (`@ApplicationScoped`, `@RequestScoped`, etc.). This starts a real Quarkus container that resolves `@ConfigMapping` interfaces from `src/test/resources/application.properties` — no manual config wiring needed.
+
+### Injection pattern
+
+```java
+@QuarkusTest
+class MyServiceTest {
+
+    @Inject
+    MyService service;                 // real CDI bean — config wired automatically
+
+    @InjectMock
+    SomeCdiCollaborator collaborator;  // CDI bean replaced by a Mockito mock
+
+    @BeforeEach
+    void setUp() {
+        // Replace only the gRPC stub/channel (infrastructure, not a CDI bean)
+        service.memoriesStub = mock(AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub.class);
+        service.channel       = mock(ManagedChannel.class);
+    }
+}
+```
+
+### Rules
+
+| Scenario | Pattern |
+|---|---|
+| Service under test (CDI bean) | `@Inject` |
+| CDI collaborator to control (e.g. `ConsolidationService`, `ProfileConsolidationStrategy`) | `@InjectMock` (Quarkus replaces the bean with a Mockito mock) |
+| gRPC stub / `ManagedChannel` (not a CDI bean) | `mock()` in `@BeforeEach`, assigned to the package-private field |
+| Config values (`MemoryServiceConfig`, `CognitionConfig`) | **Do not mock** — values come from `src/test/resources/application.properties` via CDI |
+| Pure-logic classes with no CDI (`DirtyWindow`, `EvidencePack`, records) | Plain JUnit 5, no `@QuarkusTest` needed |
+
+### `src/test/resources/application.properties`
+
+All config properties required by `@ConfigMapping` interfaces must be present. When adding a new property to `MemoryServiceConfig` or `CognitionConfig`, add a test value here so `@QuarkusTest` container starts cleanly.
+
+**Never** mock `MemoryServiceConfig` or `CognitionConfig` in a `@QuarkusTest` class — CDI already injects the real implementations populated from `application.properties`.
+
+## Configuration
+
+Use **`@ConfigMapping`** (SmallRye / Quarkus typed config) instead of `@ConfigProperty` for all new configuration in this project.
+
+Two shared config mapping interfaces centralise the project's configuration:
+
+- **[`MemoryServiceConfig`](src/main/java/io/github/rigazilla/memory/cognition/config/MemoryServiceConfig.java)** — prefix `memory-service` — gRPC host/port, API key, client ID.
+- **[`CognitionConfig`](src/main/java/io/github/rigazilla/memory/cognition/config/CognitionConfig.java)** — prefix `cognition` — runtime identity, worker ID, checkpoint, scheduler, LLM retry/backfill, secrets provider.
+
+**Usage pattern:**
+
+```java
+@Inject
+MemoryServiceConfig memoryService;
+
+channel = GrpcChannelFactory.create(
+    memoryService.grpc().host(), memoryService.grpc().port(),
+    memoryService.apiKey(), memoryService.clientId());
+```
+
+**Rules:**
+- **Never** add new `@ConfigProperty` fields. Extend the existing `@ConfigMapping` interfaces or add a new one for a genuinely distinct configuration domain.
+- Default values belong in the `@WithDefault` annotation on the interface method, **not** as `@ConfigProperty(defaultValue = ...)` on a field.
+- Package new config mapping interfaces under `io.github.rigazilla.memory.cognition.config`.
+
 ## Code Style
 
 Java code must pass **Checkstyle** and **SpotBugs** checks configured in the project root:

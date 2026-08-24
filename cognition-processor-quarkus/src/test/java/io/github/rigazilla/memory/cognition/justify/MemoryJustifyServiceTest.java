@@ -13,6 +13,9 @@ import io.github.chirino.memory.grpc.v1.Entry;
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.quarkus.arc.Arc;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -36,28 +39,31 @@ import static org.mockito.Mockito.*;
  * - UUID conversion utilities
  * - Missing entry placeholders
  */
+@QuarkusTest
 class MemoryJustifyServiceTest {
 
-    private MemoryJustifyService service;
+    @Inject
+    MemoryJustifyService service;
+
+    /** The real (non-proxy) bean instance — used for field injection of mock stubs. */
+    private MemoryJustifyService realService;
+
     private AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub mockMemoriesStub;
     private AdminEntriesServiceGrpc.AdminEntriesServiceBlockingStub mockEntriesStub;
-    private ManagedChannel mockChannel;
 
     @BeforeEach
     void setUp() {
-        service = new MemoryJustifyService();
         mockMemoriesStub = mock(AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub.class);
         mockEntriesStub = mock(AdminEntriesServiceGrpc.AdminEntriesServiceBlockingStub.class);
-        mockChannel = mock(ManagedChannel.class);
+        ManagedChannel mockChannel = mock(ManagedChannel.class);
 
-        // Inject mocks
-        service.memoriesStub = mockMemoriesStub;
-        service.entriesStub = mockEntriesStub;
-        service.channel = mockChannel;
-        service.grpcHost = "localhost";
-        service.grpcPort = 8082;
-        service.apiKey = "test-key";
-        service.clientId = "test-client";
+        // Unwrap CDI proxy to reach the real bean instance — field assignment on the proxy
+        // itself is a no-op because @ApplicationScoped beans are wrapped in client proxies.
+        // arc_contextualInstance() returns the actual delegate, not the proxy shell.
+        realService = (MemoryJustifyService) ((io.quarkus.arc.ClientProxy) service).arc_contextualInstance();
+        realService.memoriesStub = mockMemoriesStub;
+        realService.entriesStub = mockEntriesStub;
+        realService.channel = mockChannel;
     }
 
     @Test

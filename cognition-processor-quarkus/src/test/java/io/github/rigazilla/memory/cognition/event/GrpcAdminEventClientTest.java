@@ -1,8 +1,5 @@
 package io.github.rigazilla.memory.cognition.event;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.protobuf.ByteString;
 import io.github.chirino.memory.grpc.v1.EventNotification;
 import io.github.chirino.memory.grpc.v1.EventScope;
 import io.github.chirino.memory.grpc.v1.EventStreamServiceGrpc;
@@ -13,13 +10,19 @@ import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
+import io.quarkus.arc.Arc;
 import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.StartupEvent;
+import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.protobuf.ByteString;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -43,47 +46,31 @@ import static org.mockito.Mockito.*;
  * - JSON field extraction
  * - Metrics tracking
  */
+@QuarkusTest
 class GrpcAdminEventClientTest {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    @Inject
+    GrpcAdminEventClient client;
 
-    private GrpcAdminEventClient client;
-    private CheckpointService checkpointService;
-    private DirtyWindowRegistry windowRegistry;
-    private ManagedChannel mockChannel;
-    private EventStreamServiceGrpc.EventStreamServiceStub mockStub;
+    /** The real (non-proxy) bean instance — used for direct field access (lastEventCursor etc.). */
+    private GrpcAdminEventClient realClient;
+
+    @InjectMock
+    CheckpointService checkpointService;
+
+    @InjectMock
+    DirtyWindowRegistry windowRegistry;
 
     @BeforeEach
     void setUp() {
-        client = new GrpcAdminEventClient();
-        checkpointService = mock(CheckpointService.class);
-        windowRegistry = mock(DirtyWindowRegistry.class);
-        mockChannel = mock(ManagedChannel.class);
-        mockStub = mock(EventStreamServiceGrpc.EventStreamServiceStub.class);
-
-        // Inject mocks
-        client.checkpointService = checkpointService;
-        client.windowRegistry = windowRegistry;
-
-        // Install the scorer in pass-through mode so the handleEvent tests below
-        // exercise event routing without salience filtering.
-        SalienceScorerConfigStub salienceConfig = new SalienceScorerConfigStub();
-        salienceConfig.enabled = false;
-        salienceConfig.metricsEnabled = false;
-        SalienceScorer scorer = new SalienceScorer(salienceConfig, new KeywordLoader(salienceConfig));
-        scorer.init();
-        client.salienceScorer = scorer;
-        client.objectMapper = new ObjectMapper();
-
-        // Set config properties
-        client.grpcHost = "localhost";
-        client.grpcPort = 8082;
-        client.apiKey = "test-api-key";
-        client.clientId = "test-client";
-        client.workerId = "test-worker";
-        client.runtimeId = "test-runtime";
-        client.runtimeVersion = "1";
-        client.resetCheckpointOnStartup = false;
+        // Config is wired by CDI from test/resources/application.properties.
+        // CheckpointService and DirtyWindowRegistry are replaced by @InjectMock above.
+        // arc_contextualInstance() returns the actual delegate, not the proxy shell, so
+        // direct field reads/writes (lastEventCursor, eventsAccepted) reach the real bean.
+        realClient = (GrpcAdminEventClient) ((io.quarkus.arc.ClientProxy) client).arc_contextualInstance();
+        // Reset mutable state so tests are independent of execution order
+        realClient.lastEventCursor = null;
+        realClient.eventsAccepted.set(0);
     }
 
 
@@ -91,7 +78,7 @@ class GrpcAdminEventClientTest {
     @Test
     void testOnShutdown_SavesCheckpoint() {
         // Given: Client has processed events
-        client.lastEventCursor = "cursor-final";
+        realClient.lastEventCursor = "cursor-final";
         when(windowRegistry.serializeWindows()).thenReturn(List.of());
 
         // When: Shutdown event is observed
@@ -103,7 +90,7 @@ class GrpcAdminEventClientTest {
             eq("test-worker"),
             eq("cursor-final"),
             eq("test-runtime"),
-            eq("1"),
+            eq("1.0.0-test"),
             anyList()
         );
     }
@@ -172,7 +159,7 @@ class GrpcAdminEventClientTest {
         client.handleEvent(event);
 
         // Then: Should update last cursor
-        assertEquals("cursor-new", client.lastEventCursor);
+        assertEquals("cursor-new", realClient.lastEventCursor);
     }
 
     @Test
@@ -213,7 +200,7 @@ class GrpcAdminEventClientTest {
         client.handleEvent(event);
 
         // Then: Should reset checkpoint and clear windows
-        verify(checkpointService).resetCheckpoint("test-worker", "test-runtime", "1");
+        verify(checkpointService).resetCheckpoint("test-worker", "test-runtime", "1.0.0-test");
         verify(windowRegistry).clear();
     }
 
@@ -310,7 +297,7 @@ class GrpcAdminEventClientTest {
     @Test
     void testSaveCheckpoint_NoCursor_SkipsSave() {
         // Given: No cursor set
-        client.lastEventCursor = null;
+        realClient.lastEventCursor = null;
 
         // When: Save checkpoint
         client.saveCheckpoint();
@@ -324,7 +311,7 @@ class GrpcAdminEventClientTest {
     @Test
     void testSaveCheckpoint_WithCursor_SavesState() {
         // Given: Cursor and windows
-        client.lastEventCursor = "cursor-123";
+        realClient.lastEventCursor = "cursor-123";
         List<SerializedWindow> windows = List.of(
             new SerializedWindow("conv1", "cursor1", "cursor1", List.of(), null, Instant.now(), Instant.now(), Instant.now(), 0)
         );
@@ -338,7 +325,7 @@ class GrpcAdminEventClientTest {
             eq("test-worker"),
             eq("cursor-123"),
             eq("test-runtime"),
-            eq("1"),
+            eq("1.0.0-test"),
             eq(windows)
         );
     }
@@ -346,7 +333,7 @@ class GrpcAdminEventClientTest {
     @Test
     void testSaveCheckpoint_Exception_LogsError() {
         // Given: Checkpoint service throws exception
-        client.lastEventCursor = "cursor-123";
+        realClient.lastEventCursor = "cursor-123";
         when(windowRegistry.serializeWindows()).thenReturn(List.of());
         doThrow(new RuntimeException("Save failed"))
             .when(checkpointService).saveCheckpoint(anyString(), anyString(), anyString(), anyString(), anyList());
@@ -386,12 +373,25 @@ class GrpcAdminEventClientTest {
     @Nested
     class SalienceGate {
 
+        private static final ObjectMapper MAPPER = new ObjectMapper();
+
+        @BeforeEach
+        void installDisabledScorer() {
+            // Install a disabled scorer so that pass-through behaviour is the default
+            // for all SalienceGate tests. Tests that need filtering call useEnabledScorer().
+            SalienceScorerConfigStub disabledConfig = new SalienceScorerConfigStub();
+            disabledConfig.enabled = false;
+            SalienceScorer disabled = new SalienceScorer(disabledConfig, new KeywordLoader(disabledConfig));
+            disabled.init();
+            realClient.salienceScorer = disabled;
+        }
+
         /** Installs a fully enabled scorer with bundled keywords loaded. */
         private void useEnabledScorer() {
             SalienceScorerConfigStub enabledConfig = new SalienceScorerConfigStub();
             SalienceScorer enabled = new SalienceScorer(enabledConfig, new KeywordLoader(enabledConfig));
             enabled.init();
-            client.salienceScorer = enabled;
+            realClient.salienceScorer = enabled;
         }
 
         /**
@@ -507,7 +507,7 @@ class GrpcAdminEventClientTest {
             // The event must still reach the registry — a scorer failure must never drop an event.
             SalienceScorer broken = mock(SalienceScorer.class);
             when(broken.shouldKeep(any())).thenThrow(new RuntimeException("scorer exploded"));
-            client.salienceScorer = broken;
+            realClient.salienceScorer = broken;
 
             client.handleEvent(eventWithText("conv-1", "cur-1", "deploy now"));
 

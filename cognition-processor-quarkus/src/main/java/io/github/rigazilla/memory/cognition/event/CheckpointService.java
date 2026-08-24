@@ -8,6 +8,7 @@ import io.github.chirino.memory.grpc.v1.AdminCheckpoint;
 import io.github.chirino.memory.grpc.v1.AdminCheckpointServiceGrpc;
 import io.github.chirino.memory.grpc.v1.GetCheckpointRequest;
 import io.github.chirino.memory.grpc.v1.PutCheckpointRequest;
+import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
@@ -15,7 +16,7 @@ import io.grpc.StatusRuntimeException;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
@@ -33,17 +34,8 @@ public class CheckpointService {
     private static final Logger LOG = Logger.getLogger(CheckpointService.class);
     private static final String CONTENT_TYPE = "application/json";
 
-    @ConfigProperty(name = "memory-service.grpc.host")
-    String grpcHost;
-
-    @ConfigProperty(name = "memory-service.grpc.port")
-    int grpcPort;
-
-    @ConfigProperty(name = "memory-service.api-key")
-    String apiKey;
-
-    @ConfigProperty(name = "memory-service.client-id")
-    String clientId;
+    @Inject
+    MemoryServiceConfig memoryService;
 
     ManagedChannel channel;
     AdminCheckpointServiceGrpc.AdminCheckpointServiceBlockingStub checkpointStub;
@@ -60,10 +52,13 @@ public class CheckpointService {
 
     @PostConstruct
     void init() {
-        LOG.infof("Initializing CheckpointService with gRPC: %s:%d", grpcHost, grpcPort);
+        LOG.infof("Initializing CheckpointService with gRPC: %s:%d",
+                memoryService.grpc().host(), memoryService.grpc().port());
 
         // Create gRPC channel with authentication interceptor
-        channel = GrpcChannelFactory.create(grpcHost, grpcPort, apiKey, clientId);
+        channel = GrpcChannelFactory.create(
+                memoryService.grpc().host(), memoryService.grpc().port(),
+                memoryService.apiKey(), memoryService.clientId());
 
         // Create blocking stub for synchronous checkpoint operations
         checkpointStub = AdminCheckpointServiceGrpc.newBlockingStub(channel);

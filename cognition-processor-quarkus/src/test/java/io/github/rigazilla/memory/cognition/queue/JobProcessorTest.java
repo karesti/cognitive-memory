@@ -4,14 +4,18 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
 import io.github.chirino.memory.grpc.v1.AdminConversation;
-import io.github.chirino.memory.grpc.v1.AdminConversationsServiceGrpc;
 import io.github.chirino.memory.grpc.v1.Entry;
+import io.github.chirino.memory.grpc.v1.AdminConversationsServiceGrpc;
 import io.github.rigazilla.memory.cognition.consolidation.ConsolidationService;
 import io.github.rigazilla.memory.cognition.event.SalienceScorer;
 import io.github.rigazilla.memory.cognition.evidence.EvidencePack;
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.quarkus.arc.Arc;
+import io.quarkus.test.InjectMock;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -35,37 +39,38 @@ import static org.mockito.Mockito.*;
  * 
  * Note: Full pipeline integration tests are in separate integration test suite.
  */
+@QuarkusTest
 class JobProcessorTest {
 
-    private JobProcessor processor;
-    private JobQueueRegistry registry;
+    @Inject
+    JobProcessor processor;
+
+    /** The real (non-proxy) bean instance — used for field injection of mock stubs. */
+    private JobProcessor realProcessor;
+
+    @InjectMock
+    JobQueueRegistry registry;
+
+    @InjectMock
+    ConsolidationService consolidationService;
+
     private AdminConversationsServiceGrpc.AdminConversationsServiceBlockingStub conversationsStub;
     private ManagedChannel mockChannel;
-    private ConsolidationService consolidationService;
-    private SalienceScorer salienceScorer;
+    private SalienceScorer mockSalienceScorer;
 
     @BeforeEach
     void setUp() {
-        processor = new JobProcessor();
-        registry = mock(JobQueueRegistry.class);
         conversationsStub = mock(AdminConversationsServiceGrpc.AdminConversationsServiceBlockingStub.class);
         mockChannel = mock(ManagedChannel.class);
-        consolidationService = mock(ConsolidationService.class);
+        mockSalienceScorer = mock(SalienceScorer.class);
 
-        // Inject mocks
-        processor.registry = registry;
-        processor.conversationsStub = conversationsStub;
-        processor.channel = mockChannel;
-        processor.consolidationService = consolidationService;
-        processor.salienceScorer = mock(SalienceScorer.class);
-
-        // Set config
-        processor.grpcHost = "localhost";
-        processor.grpcPort = 8082;
-        processor.apiKey = "test-key";
-        processor.clientId = "test-client";
-        processor.runtimeId = "test-runtime";
-        processor.runtimeVersion = "1.0.0";
+        // Unwrap CDI proxy to reach the real bean instance — field assignment on the proxy
+        // itself is a no-op because @ApplicationScoped beans are wrapped in client proxies.
+        // arc_contextualInstance() returns the actual delegate, not the proxy shell.
+        realProcessor = (JobProcessor) ((io.quarkus.arc.ClientProxy) processor).arc_contextualInstance();
+        realProcessor.conversationsStub = conversationsStub;
+        realProcessor.channel = mockChannel;
+        realProcessor.salienceScorer = mockSalienceScorer;
     }
 
     @Test
@@ -208,7 +213,7 @@ class JobProcessorTest {
     @Test
     void testCleanup_NullChannel_DoesNotThrow() {
         // Given: Null channel
-        processor.channel = null;
+        realProcessor.channel = null;
 
         // When/Then: Should not throw
         assertDoesNotThrow(() -> processor.cleanup());
@@ -216,22 +221,21 @@ class JobProcessorTest {
 
     @Test
     void testInit_CreatesGrpcChannel() {
-        // Given: Fresh processor
-        JobProcessor newProcessor = new JobProcessor();
-        newProcessor.grpcHost = "test-host";
-        newProcessor.grpcPort = 9999;
-        newProcessor.apiKey = "key";
-        newProcessor.clientId = "client";
+        // init() on the CDI-managed singleton creates a channel to the test gRPC address
+        // (localhost:50051 from test application.properties). Verify the channel and stub
+        // are non-null after the @PostConstruct lifecycle runs.
+        // Replace the stub again to prove init() wires it correctly.
+        realProcessor.channel = null;
+        realProcessor.conversationsStub = null;
 
-        // When: Init
-        newProcessor.init();
+        processor.init();
 
-        // Then: Should create channel and stub
-        assertNotNull(newProcessor.channel);
-        assertNotNull(newProcessor.conversationsStub);
+        assertNotNull(realProcessor.channel);
+        assertNotNull(realProcessor.conversationsStub);
 
-        // Cleanup
-        newProcessor.cleanup();
+        // Restore mocks so subsequent tests are not affected
+        realProcessor.conversationsStub = conversationsStub;
+        realProcessor.channel = mockChannel;
     }
 
     @Test
@@ -367,7 +371,7 @@ class JobProcessorTest {
 
     @Test
     void filterEvidenceForBatch_RemovesLowSalienceNonBatchEntries() {
-        when(processor.salienceScorer.shouldKeep("thanks")).thenReturn(false);
+        when(mockSalienceScorer.shouldKeep("thanks")).thenReturn(false);
 
         EvidencePack filtered = processor.filterEvidenceForBatch(
             List.of("00000000-0000-0000-0000-000000000002"),
@@ -393,7 +397,7 @@ class JobProcessorTest {
 
         assertEquals(1, filtered.size());
         assertTrue(filtered.formatAsText().contains("thanks"));
-        verify(processor.salienceScorer, never()).shouldKeep(any());
+        verify(mockSalienceScorer, never()).shouldKeep(any());
     }
 
     private Entry historyEntry(String id, String role, String text) {

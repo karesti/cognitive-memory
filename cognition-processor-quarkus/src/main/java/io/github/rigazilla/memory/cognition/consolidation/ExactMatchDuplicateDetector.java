@@ -4,6 +4,7 @@ import io.github.chirino.memory.grpc.v1.AdminMemoriesServiceGrpc;
 import io.github.chirino.memory.grpc.v1.AdminSearchMemoriesRequest;
 import io.github.chirino.memory.grpc.v1.AdminSearchMemoriesResponse;
 import io.github.chirino.memory.grpc.v1.MemoryItem;
+import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.extraction.MemoryCandidate;
 import io.grpc.ManagedChannel;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
@@ -12,7 +13,7 @@ import io.grpc.StatusRuntimeException;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
@@ -36,22 +37,19 @@ public class ExactMatchDuplicateDetector implements DuplicateDetector {
     private static final String COGNITION_VERSION = "cognition.v1";
     private static final int SEARCH_LIMIT = 10;
 
-    @ConfigProperty(name = "memory-service.grpc.host")
-    String grpcHost;
-
-    @ConfigProperty(name = "memory-service.grpc.port")
-    int grpcPort;
-
-    @ConfigProperty(name = "memory-service.api-key")
-    String apiKey;
+    @Inject
+    MemoryServiceConfig memoryService;
 
     ManagedChannel channel;
     AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub memoriesStub;
 
     @PostConstruct
     void init() {
-        LOG.infof("Initializing ExactMatchDuplicateDetector: %s:%d", grpcHost, grpcPort);
-        channel = GrpcChannelFactory.create(grpcHost, grpcPort, apiKey);
+        LOG.infof("Initializing ExactMatchDuplicateDetector: %s:%d",
+                memoryService.grpc().host(), memoryService.grpc().port());
+        channel = GrpcChannelFactory.create(
+                memoryService.grpc().host(), memoryService.grpc().port(),
+                memoryService.apiKey());
         memoriesStub = AdminMemoriesServiceGrpc.newBlockingStub(channel);
         LOG.info("ExactMatchDuplicateDetector initialized successfully");
     }

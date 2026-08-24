@@ -13,6 +13,9 @@ import io.github.chirino.memory.grpc.v1.MemoryWriteResult;
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.quarkus.arc.Arc;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -51,11 +54,16 @@ import static org.mockito.Mockito.*;
  *   <li>expectedRevision is forwarded to putMemory to guard against concurrent writes</li>
  * </ul>
  */
+@QuarkusTest
 class TemporalMetadataEnrichmentServiceTest {
 
-    private TemporalMetadataEnrichmentService service;
+    @Inject
+    TemporalMetadataEnrichmentService service;
+
+    /** The real (non-proxy) bean instance — used for field injection of mock stubs. */
+    private TemporalMetadataEnrichmentService realService;
+
     private AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub mockStub;
-    private ManagedChannel mockChannel;
 
     // Reusable empty write result
     private static final MemoryWriteResult WRITE_OK = MemoryWriteResult.newBuilder()
@@ -64,15 +72,23 @@ class TemporalMetadataEnrichmentServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new TemporalMetadataEnrichmentService();
         mockStub = mock(AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub.class);
-        mockChannel = mock(ManagedChannel.class);
+        ManagedChannel mockChannel = mock(ManagedChannel.class);
 
-        service.memoriesStub = mockStub;
-        service.channel = mockChannel;
-        service.grpcHost = "localhost";
-        service.grpcPort = 8082;
-        service.apiKey = "test-key";
+        // Unwrap CDI proxy to reach the real bean instance — field assignment on the proxy
+        // itself is a no-op because @ApplicationScoped beans are wrapped in client proxies.
+        // arc_contextualInstance() returns the actual delegate, not the proxy shell.
+        realService = (TemporalMetadataEnrichmentService)
+                ((io.quarkus.arc.ClientProxy) service).arc_contextualInstance();
+        realService.memoriesStub = mockStub;
+        realService.channel = mockChannel;
+        // Reset counters and flags so tests are independent of execution order
+        realService.running.set(false);
+        realService.scanned.set(0);
+        realService.enriched.set(0);
+        realService.skipped.set(0);
+        realService.errors.set(0);
+        realService.conflicts.set(0);
     }
 
     // -------------------------------------------------------------------------
@@ -81,12 +97,12 @@ class TemporalMetadataEnrichmentServiceTest {
 
     @Test
     void allCountersStartAtZero() {
-        assertEquals(0L, service.scanned.get());
-        assertEquals(0L, service.enriched.get());
-        assertEquals(0L, service.skipped.get());
-        assertEquals(0L, service.errors.get());
-        assertEquals(0L, service.conflicts.get());
-        assertFalse(service.running.get());
+        assertEquals(0L, realService.scanned.get());
+        assertEquals(0L, realService.enriched.get());
+        assertEquals(0L, realService.skipped.get());
+        assertEquals(0L, realService.errors.get());
+        assertEquals(0L, realService.conflicts.get());
+        assertFalse(realService.running.get());
     }
 
     // -------------------------------------------------------------------------
@@ -104,10 +120,10 @@ class TemporalMetadataEnrichmentServiceTest {
 
         service.runBackfill();
 
-        assertEquals(1L, service.scanned.get());
-        assertEquals(1L, service.enriched.get());
-        assertEquals(0L, service.skipped.get());
-        assertEquals(0L, service.errors.get());
+        assertEquals(1L, realService.scanned.get());
+        assertEquals(1L, realService.enriched.get());
+        assertEquals(0L, realService.skipped.get());
+        assertEquals(0L, realService.errors.get());
     }
 
     @Test
@@ -242,9 +258,9 @@ class TemporalMetadataEnrichmentServiceTest {
 
         service.runBackfill();
 
-        assertEquals(1L, service.scanned.get());
-        assertEquals(0L, service.enriched.get());
-        assertEquals(1L, service.skipped.get());
+        assertEquals(1L, realService.scanned.get());
+        assertEquals(0L, realService.enriched.get());
+        assertEquals(1L, realService.skipped.get());
         verify(mockStub, never()).putMemory(any());
     }
 
@@ -263,7 +279,7 @@ class TemporalMetadataEnrichmentServiceTest {
 
         service.runBackfill();
 
-        assertEquals(1L, service.enriched.get(),
+        assertEquals(1L, realService.enriched.get(),
             "memory with blank observed_at must be re-enriched, not skipped");
     }
 
@@ -281,9 +297,9 @@ class TemporalMetadataEnrichmentServiceTest {
 
         service.runBackfill();
 
-        assertEquals(1L, service.scanned.get());
-        assertEquals(0L, service.enriched.get());
-        assertEquals(1L, service.skipped.get());
+        assertEquals(1L, realService.scanned.get());
+        assertEquals(0L, realService.enriched.get());
+        assertEquals(1L, realService.skipped.get());
         verify(mockStub, never()).putMemory(any());
     }
 
@@ -313,8 +329,8 @@ class TemporalMetadataEnrichmentServiceTest {
 
         service.runBackfill();
 
-        assertEquals(2L, service.scanned.get(), "both pages must be scanned");
-        assertEquals(2L, service.enriched.get(), "both items must be enriched");
+        assertEquals(2L, realService.scanned.get(), "both pages must be scanned");
+        assertEquals(2L, realService.enriched.get(), "both items must be enriched");
         verify(mockStub, times(2)).listMemories(any());
     }
 
@@ -353,34 +369,34 @@ class TemporalMetadataEnrichmentServiceTest {
     @Test
     void runBackfillRejectsSecondConcurrentInvocation() {
         // Force running=true before the call
-        service.running.set(true);
+        realService.running.set(true);
 
         service.runBackfill();
 
         // listMemories must never be called — the guard returned immediately
         verify(mockStub, never()).listMemories(any());
         // running flag must still be true (we set it; the guard did not reset it)
-        assertTrue(service.running.get());
+        assertTrue(realService.running.get());
     }
 
     @Test
     void runBackfillResetsCountersAtStart() {
         // Seed stale values from a previous imaginary run
-        service.scanned.set(99);
-        service.enriched.set(88);
-        service.skipped.set(77);
-        service.errors.set(66);
-        service.conflicts.set(55);
+        realService.scanned.set(99);
+        realService.enriched.set(88);
+        realService.skipped.set(77);
+        realService.errors.set(66);
+        realService.conflicts.set(55);
 
         when(mockStub.listMemories(any())).thenReturn(emptyPage());
 
         service.runBackfill();
 
-        assertEquals(0L, service.scanned.get(), "scanned must be reset to 0 at run start");
-        assertEquals(0L, service.enriched.get(), "enriched must be reset to 0 at run start");
-        assertEquals(0L, service.skipped.get(), "skipped must be reset to 0 at run start");
-        assertEquals(0L, service.errors.get(), "errors must be reset to 0 at run start");
-        assertEquals(0L, service.conflicts.get(), "conflicts must be reset to 0 at run start");
+        assertEquals(0L, realService.scanned.get(), "scanned must be reset to 0 at run start");
+        assertEquals(0L, realService.enriched.get(), "enriched must be reset to 0 at run start");
+        assertEquals(0L, realService.skipped.get(), "skipped must be reset to 0 at run start");
+        assertEquals(0L, realService.errors.get(), "errors must be reset to 0 at run start");
+        assertEquals(0L, realService.conflicts.get(), "conflicts must be reset to 0 at run start");
     }
 
     @Test
@@ -389,7 +405,7 @@ class TemporalMetadataEnrichmentServiceTest {
 
         service.runBackfill();
 
-        assertFalse(service.running.get(), "running flag must be false after backfill completes");
+        assertFalse(realService.running.get(), "running flag must be false after backfill completes");
     }
 
     // -------------------------------------------------------------------------
@@ -407,10 +423,10 @@ class TemporalMetadataEnrichmentServiceTest {
 
         service.runBackfill();
 
-        assertEquals(1L, service.scanned.get());
-        assertEquals(0L, service.enriched.get());
-        assertEquals(1L, service.conflicts.get(), "ABORTED must increment conflicts, not errors");
-        assertEquals(0L, service.errors.get());
+        assertEquals(1L, realService.scanned.get());
+        assertEquals(0L, realService.enriched.get());
+        assertEquals(1L, realService.conflicts.get(), "ABORTED must increment conflicts, not errors");
+        assertEquals(0L, realService.errors.get());
     }
 
     @Test
@@ -424,10 +440,10 @@ class TemporalMetadataEnrichmentServiceTest {
 
         service.runBackfill();
 
-        assertEquals(1L, service.scanned.get());
-        assertEquals(0L, service.enriched.get());
-        assertEquals(1L, service.errors.get(), "non-ABORTED error must increment errors");
-        assertEquals(0L, service.conflicts.get());
+        assertEquals(1L, realService.scanned.get());
+        assertEquals(0L, realService.enriched.get());
+        assertEquals(1L, realService.errors.get(), "non-ABORTED error must increment errors");
+        assertEquals(0L, realService.conflicts.get());
     }
 
     @Test
@@ -444,9 +460,9 @@ class TemporalMetadataEnrichmentServiceTest {
 
         service.runBackfill();
 
-        assertEquals(2L, service.scanned.get());
-        assertEquals(1L, service.enriched.get(), "second item must succeed despite first failing");
-        assertEquals(1L, service.errors.get());
+        assertEquals(2L, realService.scanned.get());
+        assertEquals(1L, realService.enriched.get(), "second item must succeed despite first failing");
+        assertEquals(1L, realService.errors.get());
     }
 
     // -------------------------------------------------------------------------

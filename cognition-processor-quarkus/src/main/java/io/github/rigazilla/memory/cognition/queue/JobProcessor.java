@@ -16,6 +16,8 @@ import io.github.rigazilla.memory.cognition.consolidation.ResolvedCandidate;
 import io.github.rigazilla.memory.cognition.extraction.DurableExtractionResponse;
 import io.github.rigazilla.memory.cognition.extraction.DurableMemoryExtractor;
 import io.github.rigazilla.memory.cognition.extraction.MemoryCandidate;
+import io.github.rigazilla.memory.cognition.config.CognitionConfig;
+import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.github.rigazilla.memory.cognition.model.Provenance;
 import io.github.rigazilla.memory.cognition.resource.LlmRetryHelper;
@@ -31,7 +33,6 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.nio.ByteBuffer;
@@ -66,23 +67,11 @@ public class JobProcessor {
 
     private static final Logger LOG = Logger.getLogger(JobProcessor.class);
 
-    @ConfigProperty(name = "memory-service.grpc.host")
-    String grpcHost;
+    @Inject
+    MemoryServiceConfig memoryService;
 
-    @ConfigProperty(name = "memory-service.grpc.port")
-    int grpcPort;
-
-    @ConfigProperty(name = "memory-service.api-key")
-    String apiKey;
-
-    @ConfigProperty(name = "memory-service.client-id")
-    String clientId;
-
-    @ConfigProperty(name = "cognition.runtime.id")
-    String runtimeId;
-
-    @ConfigProperty(name = "cognition.runtime.version", defaultValue = "1.0.0-SNAPSHOT")
-    String runtimeVersion;
+    @Inject
+    CognitionConfig cognition;
 
     @Inject
     JobQueueRegistry registry;
@@ -127,10 +116,13 @@ public class JobProcessor {
 
     @PostConstruct
     void init() {
-        LOG.infof("Initializing JobProcessor gRPC clients: %s:%d", grpcHost, grpcPort);
+        LOG.infof("Initializing JobProcessor gRPC clients: %s:%d",
+                memoryService.grpc().host(), memoryService.grpc().port());
 
         // Create gRPC channel with authentication interceptor
-        channel = GrpcChannelFactory.create(grpcHost, grpcPort, apiKey, clientId);
+        channel = GrpcChannelFactory.create(
+                memoryService.grpc().host(), memoryService.grpc().port(),
+                memoryService.apiKey(), memoryService.clientId());
 
         conversationsStub = AdminConversationsServiceGrpc.newBlockingStub(channel);
 
@@ -252,7 +244,8 @@ public class JobProcessor {
             }
 
             // Build provenance from ScopeJob for this batch
-            Provenance provenance = Provenance.fromScopeJobMinimal(job, runtimeId, runtimeVersion);
+            Provenance provenance = Provenance.fromScopeJobMinimal(
+                    job, cognition.runtime().id(), cognition.runtime().version());
             LOG.debugf("  ✓ Built provenance: batch=%d entries, trigger=%s",
                 provenance.entryIds().size(), provenance.batchTrigger());
 

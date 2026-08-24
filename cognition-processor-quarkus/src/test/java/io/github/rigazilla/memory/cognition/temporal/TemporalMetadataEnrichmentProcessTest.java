@@ -6,6 +6,10 @@ import io.github.rigazilla.memory.cognition.process.ManagedProcessInspection;
 import io.github.rigazilla.memory.cognition.process.ManagedProcessState;
 import io.github.rigazilla.memory.cognition.queue.JobProcessor;
 import io.grpc.ManagedChannel;
+import io.quarkus.arc.Arc;
+import io.quarkus.test.InjectMock;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -18,38 +22,48 @@ import static org.mockito.Mockito.*;
  *
  * <p>Covers the {@link io.github.rigazilla.memory.cognition.process.CognitiveProcess} contract
  * (R7) and the {@link TemporalMetadataEnrichmentProcess#inspect()} payload wiring (R10).
- * No CDI container needed — dependencies are injected directly.
+ *
+ * <p>Uses {@code @QuarkusTest} so CDI wires config from {@code test/resources/application.properties}.
+ * The gRPC stub/channel are replaced per test; {@link JobProcessor} is replaced by {@code @InjectMock}
+ * since only its {@code getApproximateObservedAtCount()} accessor is exercised here.
  */
+@QuarkusTest
 class TemporalMetadataEnrichmentProcessTest {
 
-    private TemporalMetadataEnrichmentProcess process;
-    private TemporalMetadataEnrichmentService enrichmentService;
-    /** Mocked so we can stub getApproximateObservedAtCount() without accessing package-private fields. */
-    private JobProcessor jobProcessor;
+    @Inject
+    TemporalMetadataEnrichmentProcess process;
+
+    @Inject
+    TemporalMetadataEnrichmentService enrichmentService;
+
+    /** The real (non-proxy) enrichment service instance — used for field injection of mock stubs. */
+    private TemporalMetadataEnrichmentService realEnrichmentService;
+
+    @InjectMock
+    JobProcessor jobProcessor;
 
     @BeforeEach
     void setUp() {
-        enrichmentService = new TemporalMetadataEnrichmentService();
-
-        // Wire a mocked gRPC stub so the service is usable without a live server
         AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub mockStub =
             mock(AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub.class);
         ManagedChannel mockChannel = mock(ManagedChannel.class);
-        enrichmentService.memoriesStub = mockStub;
-        enrichmentService.channel = mockChannel;
-        enrichmentService.grpcHost = "localhost";
-        enrichmentService.grpcPort = 8082;
-        enrichmentService.apiKey = "test-key";
-        enrichmentService.clientId = "test-client";
 
-        // Mock JobProcessor — its gRPC fields are package-private; only the public
-        // accessor getApproximateObservedAtCount() is needed here.
-        jobProcessor = mock(JobProcessor.class);
+        // Unwrap CDI proxy to reach the real bean instance — field assignment on the proxy
+        // itself is a no-op because @ApplicationScoped beans are wrapped in client proxies.
+        // arc_contextualInstance() returns the actual delegate, not the proxy shell.
+        realEnrichmentService = (TemporalMetadataEnrichmentService)
+                ((io.quarkus.arc.ClientProxy) enrichmentService).arc_contextualInstance();
+        realEnrichmentService.memoriesStub = mockStub;
+        realEnrichmentService.channel = mockChannel;
+        // Reset counters and flags so tests are independent of execution order
+        realEnrichmentService.running.set(false);
+        realEnrichmentService.scanned.set(0);
+        realEnrichmentService.enriched.set(0);
+        realEnrichmentService.skipped.set(0);
+        realEnrichmentService.errors.set(0);
+        realEnrichmentService.conflicts.set(0);
+
         when(jobProcessor.getApproximateObservedAtCount()).thenReturn(0L);
-
-        process = new TemporalMetadataEnrichmentProcess();
-        process.enrichmentService = enrichmentService;
-        process.jobProcessor = jobProcessor;
     }
 
     // -------------------------------------------------------------------------
@@ -134,11 +148,11 @@ class TemporalMetadataEnrichmentProcessTest {
     void inspectValuesMatchServiceAccessors() {
         // R10: the wiring from service accessors → inspect details must not be silently broken.
         // Seed known values on the service counters and verify they appear in the payload.
-        enrichmentService.enriched.set(7);
-        enrichmentService.errors.set(3);
-        enrichmentService.conflicts.set(2);
-        enrichmentService.scanned.set(12);
-        enrichmentService.skipped.set(2);
+        realEnrichmentService.enriched.set(7);
+        realEnrichmentService.errors.set(3);
+        realEnrichmentService.conflicts.set(2);
+        realEnrichmentService.scanned.set(12);
+        realEnrichmentService.skipped.set(2);
 
         ManagedProcessInspection result = process.inspect();
 

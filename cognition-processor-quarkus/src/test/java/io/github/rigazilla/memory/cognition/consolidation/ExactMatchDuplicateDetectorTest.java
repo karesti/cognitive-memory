@@ -13,6 +13,9 @@ import io.github.rigazilla.memory.cognition.extraction.MemoryCandidate;
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.quarkus.arc.Arc;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -27,20 +30,27 @@ import static org.mockito.Mockito.when;
 /**
  * Unit tests for ExactMatchDuplicateDetector.
  */
+@QuarkusTest
 class ExactMatchDuplicateDetectorTest {
 
-    private ExactMatchDuplicateDetector detector;
+    @Inject
+    ExactMatchDuplicateDetector detector;
+
+    /** The real (non-proxy) bean instance — used for field injection of mock stubs. */
+    private ExactMatchDuplicateDetector realDetector;
+
     private AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub mockStub;
 
     @BeforeEach
     void setUp() {
-        detector = new ExactMatchDuplicateDetector();
         mockStub = mock(AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub.class);
-        detector.memoriesStub = mockStub;
-        detector.channel = mock(ManagedChannel.class);
-        detector.grpcHost = "localhost";
-        detector.grpcPort = 8082;
-        detector.apiKey = "test-key";
+
+        // Unwrap CDI proxy to reach the real bean instance — field assignment on the proxy
+        // itself is a no-op because @ApplicationScoped beans are wrapped in client proxies.
+        // arc_contextualInstance() returns the actual delegate, not the proxy shell.
+        realDetector = (ExactMatchDuplicateDetector) ((io.quarkus.arc.ClientProxy) detector).arc_contextualInstance();
+        realDetector.memoriesStub = mockStub;
+        realDetector.channel = mock(ManagedChannel.class);
     }
 
     @Test

@@ -1,8 +1,8 @@
 package io.github.rigazilla.memory.cognition.resource;
 
+import io.github.rigazilla.memory.cognition.config.CognitionConfig;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.Optional;
@@ -17,8 +17,7 @@ public class CredentialResolver {
     private static final Logger LOG = Logger.getLogger(CredentialResolver.class);
     
     @Inject
-    @ConfigProperty(name = "cognition.secrets.provider", defaultValue = "env")
-    String secretsProvider;
+    CognitionConfig cognition;
     
     /**
      * Resolve a credential reference to its actual value.
@@ -32,8 +31,9 @@ public class CredentialResolver {
             throw new IllegalArgumentException("Credential reference cannot be null or blank");
         }
         
+        String secretsProvider = cognition.secrets().provider();
         LOG.debugf("Resolving credential reference: %s using provider: %s", credentialRef, secretsProvider);
-        
+
         return switch (secretsProvider) {
             case "env" -> resolveFromEnvironment(credentialRef);
             case "vault" -> resolveFromVault(credentialRef);
