@@ -102,6 +102,9 @@ public interface CognitionConfig {
         int maxConcurrentJobs();
     }
 
+    /** Contradiction resolution settings. */
+    Contradiction contradiction();
+
     /** LLM call settings sub-group. */
     interface Llm {
         /** LLM retry settings. */
@@ -130,6 +133,44 @@ public interface CognitionConfig {
             @WithName("inter-call-delay-ms")
             @WithDefault("0")
             long interCallDelayMs();
+        }
+    }
+
+    /** Contradiction resolution settings sub-group. */
+    interface Contradiction {
+        /**
+         * Maximum number of active memories loaded per namespace for pair-wise comparison.
+         * Limits the O(n²) LLM call cost. Namespaces with more memories are truncated.
+         */
+        @WithName("max-memories-per-namespace")
+        @WithDefault("50")
+        int maxMemoriesPerNamespace();
+
+        /** LLM configuration for the contradiction detector. */
+        LlmConfig llm();
+
+        /** LLM settings for a specific cognitive process. */
+        interface LlmConfig {
+            /** LLM provider name (e.g. {@code "ollama"}, {@code "openai"}). */
+            @WithDefault("ollama")
+            String provider();
+
+            /** Model identifier (e.g. {@code "llama3.2"}, {@code "gpt-4o"}). */
+            @WithDefault("llama3.2")
+            String model();
+
+            /** Sampling temperature — lower values produce more deterministic output. */
+            @WithDefault("0.1")
+            Double temperature();
+
+            /** Maximum number of tokens the model may generate. */
+            @WithName("max-tokens")
+            @WithDefault("512")
+            Integer maxTokens();
+
+            /** Per-call timeout as an ISO-8601 duration (e.g. {@code PT60S}). */
+            @WithDefault("PT60S")
+            java.time.Duration timeout();
         }
     }
 
