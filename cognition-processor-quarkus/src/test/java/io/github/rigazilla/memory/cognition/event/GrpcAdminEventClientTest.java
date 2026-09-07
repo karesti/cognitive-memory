@@ -4,6 +4,7 @@ import io.github.chirino.memory.grpc.v1.EventNotification;
 import io.github.chirino.memory.grpc.v1.EventScope;
 import io.github.chirino.memory.grpc.v1.EventStreamServiceGrpc;
 import io.github.chirino.memory.grpc.v1.SubscribeEventsRequest;
+import io.github.rigazilla.memory.cognition.config.CognitionConfig;
 import io.grpc.CallCredentials;
 import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
@@ -37,7 +38,7 @@ import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for GrpcAdminEventClient.
- * 
+ *
  * Tests cover:
  * - Connection lifecycle (startup, shutdown, reconnect)
  * - Event handling (conversation, entry, invalidate events)
@@ -51,6 +52,9 @@ class GrpcAdminEventClientTest {
 
     @Inject
     GrpcAdminEventClient client;
+
+    @Inject
+    CognitionConfig cognition;
 
     /** The real (non-proxy) bean instance — used for direct field access (lastEventCursor etc.). */
     private GrpcAdminEventClient realClient;
@@ -87,10 +91,10 @@ class GrpcAdminEventClientTest {
 
         // Then: Should save checkpoint
         verify(checkpointService).saveCheckpoint(
-            eq("test-worker"),
+            eq(cognition.worker().id()),
             eq("cursor-final"),
-            eq("test-runtime"),
-            eq("1.0.0-test"),
+            eq(cognition.runtime().id()),
+            eq(cognition.runtime().version()),
             anyList()
         );
     }
@@ -200,7 +204,11 @@ class GrpcAdminEventClientTest {
         client.handleEvent(event);
 
         // Then: Should reset checkpoint and clear windows
-        verify(checkpointService).resetCheckpoint("test-worker", "test-runtime", "1.0.0-test");
+        verify(checkpointService).resetCheckpoint(
+            cognition.worker().id(),
+            cognition.runtime().id(),
+            cognition.runtime().version()
+        );
         verify(windowRegistry).clear();
     }
 
@@ -322,10 +330,10 @@ class GrpcAdminEventClientTest {
 
         // Then: Should save with cursor and windows
         verify(checkpointService).saveCheckpoint(
-            eq("test-worker"),
+            eq(cognition.worker().id()),
             eq("cursor-123"),
-            eq("test-runtime"),
-            eq("1.0.0-test"),
+            eq(cognition.runtime().id()),
+            eq(cognition.runtime().version()),
             eq(windows)
         );
     }
