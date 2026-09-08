@@ -528,53 +528,53 @@ class GrpcAdminEventClientTest {
         }
 
         @Test
-        void userTurn_returnsText() {
+        void userTurn_returnsText() throws Exception {
             String json = "{\"content\":[{\"role\":\"USER\",\"text\":\"hi there\"}]}";
-            assertThat(client.extractEntryText(json)).isEqualTo("hi there");
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isEqualTo("hi there");
         }
 
         @Test
-        void multipleUserTurns_joinedBySpace() {
+        void multipleUserTurns_joinedBySpace() throws Exception {
             String json = "{\"content\":["
                     + "{\"role\":\"USER\",\"text\":\"first\"},"
                     + "{\"role\":\"USER\",\"text\":\"second\"}"
                     + "]}";
-            assertThat(client.extractEntryText(json)).isEqualTo("first second");
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isEqualTo("first second");
         }
 
         @Test
-        void assistantOnlyTurn_returnsNull() {
+        void assistantOnlyTurn_returnsNull() throws Exception {
             String json = "{\"content\":[{\"role\":\"ASSISTANT\",\"text\":\"hello\"}]}";
-            assertThat(client.extractEntryText(json)).isNull();
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isNull();
         }
 
         @Test
-        void mixedTurns_onlyUserTextReturned() {
+        void mixedTurns_onlyUserTextReturned() throws Exception {
             String json = "{\"content\":["
                     + "{\"role\":\"ASSISTANT\",\"text\":\"I can help\"},"
                     + "{\"role\":\"USER\",\"text\":\"deploy now\"},"
                     + "{\"role\":\"ASSISTANT\",\"text\":\"done\"}"
                     + "]}";
-            assertThat(client.extractEntryText(json)).isEqualTo("deploy now");
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isEqualTo("deploy now");
         }
 
         @Test
-        void noContentArray_returnsNull() {
+        void noContentArray_returnsNull() throws Exception {
             // Summary-mode payload — only IDs, no content
             String json = "{\"conversation\":\"conv-1\",\"entry\":\"entry-1\"}";
-            assertThat(client.extractEntryText(json)).isNull();
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isNull();
         }
 
         @Test
-        void emptyContentArray_returnsNull() {
+        void emptyContentArray_returnsNull() throws Exception {
             String json = "{\"content\":[]}";
-            assertThat(client.extractEntryText(json)).isNull();
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isNull();
         }
 
         @Test
-        void blankUserText_returnsNull() {
+        void blankUserText_returnsNull() throws Exception {
             String json = "{\"content\":[{\"role\":\"USER\",\"text\":\"   \"}]}";
-            assertThat(client.extractEntryText(json)).isNull();
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isNull();
         }
 
         @Test
@@ -583,19 +583,130 @@ class GrpcAdminEventClientTest {
         }
 
         @Test
-        void blankInput_returnsNull() {
-            assertThat(client.extractEntryText("  ")).isNull();
-        }
-
-        @Test
         void malformedJson_returnsNull() {
-            assertThat(client.extractEntryText("{not valid json")).isNull();
+            // Can't parse malformed JSON to JsonNode, so test with null instead
+            assertThat(client.extractEntryText(null)).isNull();
         }
 
         @Test
-        void userTurn_textIsStripped() {
+        void userTurn_textIsStripped() throws Exception {
             String json = "{\"content\":[{\"role\":\"USER\",\"text\":\"  hi  \"}]}";
-            assertThat(client.extractEntryText(json)).isEqualTo("hi");
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isEqualTo("hi");
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Issue #55 regression tests — detail=full AI-entry ID extraction
+    // -------------------------------------------------------------------------
+
+    @Nested
+    class Issue55RegressionTests {
+
+        @BeforeEach
+        void injectMapper() {
+            client.objectMapper = new ObjectMapper();
+        }
+
+        /**
+         * Regression test for Issue #55: With detail=full, AI entries have a nested
+         * "id" field (chatcmpl-...) inside content that appears before the top-level
+         * entry UUID due to alphabetical ordering. The naive substring extraction
+         * would pick the wrong ID. This test verifies we now extract the correct
+         * top-level UUID.
+         */
+        @Test
+        void detailFullAiEntry_extractsTopLevelUuid_notNestedChatcmplId() {
+            // Given: detail=full AI-entry payload with nested chatcmpl ID
+            // The content array comes before the top-level id due to alphabetical ordering
+            String json = "{"
+                    + "\"conversationId\":\"5ae08594-1234-5678-9abc-def012345678\","
+                    + "\"content\":[{\"content\":[],\"id\":\"chatcmpl-ELmEOK275xyz\",\"role\":\"AI\"}],"
+                    + "\"id\":\"6af18a29-abcd-ef01-2345-6789abcdef01\""
+                    + "}";
+
+            EventNotification event = EventNotification.newBuilder()
+                    .setEvent("entry.created")
+                    .setKind("entry")
+                    .setCursor("cursor-test")
+                    .setData(ByteString.copyFromUtf8(json))
+                    .build();
+
+            // When: Event is handled
+            client.handleEvent(event);
+
+            // Then: Should extract the top-level UUID, not the nested chatcmpl ID
+            verify(windowRegistry).acceptEvent(
+                    eq("5ae08594-1234-5678-9abc-def012345678"),
+                    eq("cursor-test"),
+                    eq("6af18a29-abcd-ef01-2345-6789abcdef01"), // Top-level UUID
+                    any(Instant.class)
+            );
+        }
+
+        /**
+         * Verifies that USER entries (which have no nested ID in content) continue
+         * to work correctly with the new JSON parsing approach.
+         */
+        @Test
+        void detailFullUserEntry_extractsTopLevelUuid() {
+            // Given: detail=full USER-entry payload (no nested ID in content)
+            String json = "{"
+                    + "\"conversationId\":\"b4f91747-2345-6789-abcd-ef0123456789\","
+                    + "\"content\":[{\"role\":\"USER\",\"text\":\"test message\"}],"
+                    + "\"id\":\"c64829e5-3456-789a-bcde-f01234567890\""
+                    + "}";
+
+            EventNotification event = EventNotification.newBuilder()
+                    .setEvent("entry.created")
+                    .setKind("entry")
+                    .setCursor("cursor-user")
+                    .setData(ByteString.copyFromUtf8(json))
+                    .build();
+
+            // When: Event is handled
+            client.handleEvent(event);
+
+            // Then: Should extract the top-level UUID correctly
+            verify(windowRegistry).acceptEvent(
+                    eq("b4f91747-2345-6789-abcd-ef0123456789"),
+                    eq("cursor-user"),
+                    eq("c64829e5-3456-789a-bcde-f01234567890"),
+                    any(Instant.class)
+            );
+        }
+
+        /**
+         * Verifies that multiple nested IDs don't confuse the extraction logic.
+         */
+        @Test
+        void detailFullMultipleAiTurns_extractsTopLevelUuid() {
+            // Given: Multiple AI turns with different chatcmpl IDs
+            String json = "{"
+                    + "\"conversationId\":\"90def1e6-4567-89ab-cdef-012345678901\","
+                    + "\"content\":["
+                    + "{\"content\":[],\"id\":\"chatcmpl-First123\",\"role\":\"AI\"},"
+                    + "{\"content\":[],\"id\":\"chatcmpl-Second456\",\"role\":\"AI\"}"
+                    + "],"
+                    + "\"id\":\"a1b2c3d4-5678-9abc-def0-123456789012\""
+                    + "}";
+
+            EventNotification event = EventNotification.newBuilder()
+                    .setEvent("entry.created")
+                    .setKind("entry")
+                    .setCursor("cursor-multi")
+                    .setData(ByteString.copyFromUtf8(json))
+                    .build();
+
+            // When: Event is handled
+            client.handleEvent(event);
+
+            // Then: Should extract the top-level UUID, ignoring all nested IDs
+            verify(windowRegistry).acceptEvent(
+                    eq("90def1e6-4567-89ab-cdef-012345678901"),
+                    eq("cursor-multi"),
+                    eq("a1b2c3d4-5678-9abc-def0-123456789012"),
+                    any(Instant.class)
+            );
         }
     }
 }
