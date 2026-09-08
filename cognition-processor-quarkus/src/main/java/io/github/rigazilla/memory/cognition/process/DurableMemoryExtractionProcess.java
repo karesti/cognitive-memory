@@ -7,6 +7,7 @@ import io.github.rigazilla.memory.cognition.resource.LlmResourceConfiguration;
 import io.github.rigazilla.memory.cognition.resource.ResourceRequirements;
 import io.github.rigazilla.memory.cognition.verification.DurableMemoryVerifier;
 import io.quarkiverse.langchain4j.RegisterAiService;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.Config;
@@ -34,6 +35,28 @@ public class DurableMemoryExtractionProcess implements CognitiveProcess {
 
     @Inject
     Config config;
+
+    private String extractorPrompt;
+    private String verifierPrompt;
+
+    @PostConstruct
+    void init() {
+        this.extractorPrompt = loadPrompt("prompts/durable-extractor-system.md");
+        this.verifierPrompt = loadPrompt("prompts/durable-verifier-system.md");
+    }
+
+    private String loadPrompt(String promptPath) {
+        try (var stream = getClass().getClassLoader().getResourceAsStream(promptPath)) {
+            if (stream == null) {
+                LOG.warnf("Prompt resource not found on classpath: %s", promptPath);
+                return "Prompt resource not found: " + promptPath;
+            }
+            return new String(stream.readAllBytes());
+        } catch (Exception e) {
+            LOG.errorf(e, "Failed to load prompt from classpath resource: %s", promptPath);
+            return "Error loading prompt: " + promptPath;
+        }
+    }
 
     @Override
     public String id() {
@@ -100,23 +123,13 @@ public class DurableMemoryExtractionProcess implements CognitiveProcess {
                         addLlmDetails(resourceInfo, aiServiceClass);
                     }
                     
-                    String promptPath = switch (name) {
-                        case "extractor" -> "prompts/durable-extractor-system.md";
-                        case "verifier" -> "prompts/durable-verifier-system.md";
+                    String promptContent = switch (name) {
+                        case "extractor" -> extractorPrompt;
+                        case "verifier" -> verifierPrompt;
                         default -> null;
                     };
-                    if (promptPath != null) {
-                        try {
-                            String promptContent = new String(
-                                getClass().getClassLoader()
-                                    .getResourceAsStream(promptPath)
-                                    .readAllBytes()
-                            );
-                            resourceInfo.put("prompt", promptContent);
-                        } catch (Exception e) {
-                            LOG.warnf("Failed to load prompt from %s: %s", promptPath, e.getMessage());
-                            resourceInfo.put("prompt", "Error loading prompt: " + promptPath);
-                        }
+                    if (promptContent != null) {
+                        resourceInfo.put("prompt", promptContent);
                     }
                 }
                 

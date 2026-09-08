@@ -6,6 +6,7 @@ import io.github.rigazilla.memory.cognition.resource.LlmResourceConfiguration;
 import io.github.rigazilla.memory.cognition.resource.ResourceRequirements;
 import io.github.rigazilla.memory.cognition.resource.ResourceType;
 import io.quarkiverse.langchain4j.RegisterAiService;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.Config;
@@ -33,6 +34,26 @@ public class MetadataEnrichmentProcess implements CognitiveProcess {
 
     @Inject
     Config config;
+
+    private String extractorPrompt;
+
+    @PostConstruct
+    void init() {
+        this.extractorPrompt = loadPrompt("prompts/metadata-extractor-system.md");
+    }
+
+    private String loadPrompt(String promptPath) {
+        try (var stream = getClass().getClassLoader().getResourceAsStream(promptPath)) {
+            if (stream == null) {
+                LOG.warnf("Prompt resource not found on classpath: %s", promptPath);
+                return "Prompt resource not found: " + promptPath;
+            }
+            return new String(stream.readAllBytes());
+        } catch (Exception e) {
+            LOG.errorf(e, "Failed to load prompt from classpath resource: %s", promptPath);
+            return "Error loading prompt: " + promptPath;
+        }
+    }
 
     @Override
     public String id() {
@@ -101,17 +122,7 @@ public class MetadataEnrichmentProcess implements CognitiveProcess {
                 resourceInfo.put("type", resourceConfig.getType().name());
                 if (resourceConfig.getType() == ResourceType.LLM) {
                     addLlmDetails(resourceInfo, MetadataExtractor.class);
-                    try {
-                        String prompt = new String(
-                                getClass().getClassLoader()
-                                        .getResourceAsStream("prompts/metadata-extractor-system.md")
-                                        .readAllBytes()
-                        );
-                        resourceInfo.put("prompt", prompt);
-                    } catch (Exception e) {
-                        LOG.warnf("Failed to load prompt: %s", e.getMessage());
-                        resourceInfo.put("prompt", "Error loading prompt");
-                    }
+                    resourceInfo.put("prompt", this.extractorPrompt);
                 }
                 resourceTypes.put(name, resourceInfo);
             });
