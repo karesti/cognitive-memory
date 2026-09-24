@@ -139,12 +139,22 @@ public interface CognitionConfig {
     /** Contradiction resolution settings sub-group. */
     interface Contradiction {
         /**
-         * Maximum number of active memories loaded per namespace for pair-wise comparison.
-         * Limits the O(n²) LLM call cost. Namespaces with more memories are truncated.
+         * Maximum number of active memories loaded per namespace for the manual backfill
+         * batch pass. Limits the O(n²) LLM call cost. Namespaces with more memories are
+         * truncated.
          */
         @WithName("max-memories-per-namespace")
         @WithDefault("50")
         int maxMemoriesPerNamespace();
+
+        /**
+         * Number of semantically close neighbours to retrieve when checking for contradictions
+         * at insertion time. A smaller value reduces LLM call cost; a larger value catches
+         * more potential contradictions. Defaults to 5.
+         */
+        @WithName("neighbours")
+        @WithDefault("5")
+        int neighbours();
 
         /** LLM configuration for the contradiction detector. */
         LlmConfig llm();

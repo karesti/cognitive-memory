@@ -11,6 +11,7 @@ import io.github.chirino.memory.grpc.v1.MemoryWriteResult;
 import io.github.chirino.memory.grpc.v1.AdminMemoriesServiceGrpc;
 import io.github.chirino.memory.grpc.v1.AdminPutMemoryRequest;
 import io.github.rigazilla.memory.cognition.consolidation.ResolvedCandidate;
+import io.github.rigazilla.memory.cognition.contradiction.ContradictionOnInsertService;
 import io.github.rigazilla.memory.cognition.extraction.MemoryCandidate;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
@@ -40,6 +41,9 @@ public class MemoryWriter {
     
     @Inject
     MemoryServiceConfig memoryService;
+
+    @Inject
+    ContradictionOnInsertService contradictionOnInsertService;
 
     ManagedChannel channel;
     AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub memoriesStub;
@@ -225,6 +229,12 @@ public class MemoryWriter {
 
         LOG.infof("Memory written successfully: id=%s, type=%s, key=%s, update=%s",
                 bytesToUuid(result.getId()), candidate.type(), key, resolved.isUpdate());
+
+        // Trigger on-insert contradiction detection against semantic neighbours.
+        // This is best-effort; failures are logged inside the service and never block writes.
+        contradictionOnInsertService.checkOnInsert(
+                userId, candidate.type(), key,
+                candidate.content(), observedAt, candidate.confidence());
 
         return result;
     }

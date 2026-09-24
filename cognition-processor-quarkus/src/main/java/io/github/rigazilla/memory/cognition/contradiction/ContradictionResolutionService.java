@@ -33,8 +33,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Traverses existing user memories, detects contradictions between pairs using an LLM,
- * and resolves them by marking the superseded memory with status metadata.
+ * Manual backfill pass for contradiction detection and resolution.
+ *
+ * <p><b>Primary path:</b> {@link ContradictionOnInsertService} handles contradiction detection
+ * at insertion time with O(k) cost per new memory using semantic search. This service is
+ * retained for:
+ * <ul>
+ *   <li>Initial migration runs after the feature is first deployed</li>
+ *   <li>Post-bulk-import cleanup</li>
+ *   <li>Periodic housekeeping when config changes widen the detection window</li>
+ * </ul>
  *
  * <h2>Pipeline</h2>
  * <ol>
