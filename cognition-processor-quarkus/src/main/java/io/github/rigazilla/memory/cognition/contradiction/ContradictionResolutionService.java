@@ -395,15 +395,18 @@ public class ContradictionResolutionService {
         LOG.infof("Marked memory superseded: key=%s superseded_by=%s strategy=%s",
                 loser.getKey(), resolution.winnerKey(), resolution.strategyApplied().value());
 
-        // --- Update the winner with a supersedes reference ---
-        // Build a list value containing the loser key
-        com.google.protobuf.ListValue supersedesList = com.google.protobuf.ListValue.newBuilder()
-                .addValues(Value.newBuilder().setStringValue(loser.getKey()).build())
-                .build();
+        // --- Update the winner with a supersedes reference — append to any existing list ---
+        com.google.protobuf.ListValue.Builder supersedesBuilder =
+                com.google.protobuf.ListValue.newBuilder();
+        Value existingSupersedes = winner.getValue().getFieldsOrDefault("supersedes", null);
+        if (existingSupersedes != null && existingSupersedes.hasListValue()) {
+            supersedesBuilder.addAllValues(existingSupersedes.getListValue().getValuesList());
+        }
+        supersedesBuilder.addValues(Value.newBuilder().setStringValue(loser.getKey()).build());
 
         Struct winnerUpdated = winner.getValue().toBuilder()
                 .putFields("supersedes",
-                        Value.newBuilder().setListValue(supersedesList).build())
+                        Value.newBuilder().setListValue(supersedesBuilder.build()).build())
                 .build();
 
         memoriesStub.putMemory(AdminPutMemoryRequest.newBuilder()
