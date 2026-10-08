@@ -41,20 +41,12 @@ public class ProcessEnablementService implements EnablementPolicy {
 
     @Override
     public EnablementDecision decide(EnablementContext ctx) {
-        try {
-            Boolean override = overrides.get(ctx.processId());
-            if (override != null) {
-                String reason = override ? "explicitly enabled" : "explicitly disabled";
-                return new EnablementDecision(override, reason);
-            }
-            boolean def = resolveDefault(ctx.processId());
-            return new EnablementDecision(def, "default");
-        } catch (Exception e) {
-            LOG.warnf(e, "Unexpected error in enablement decision for process=%s; falling back to default",
-                    ctx.processId());
-            boolean def = safeDefault(ctx.processId());
-            return new EnablementDecision(def, "default (fail-safe after error)");
+        Boolean override = overrides.get(ctx.processId());
+        if (override != null) {
+            String reason = override ? "explicitly enabled" : "explicitly disabled";
+            return new EnablementDecision(override, reason);
         }
+        return new EnablementDecision(resolveDefault(ctx.processId()), "default");
     }
 
     // -------------------------------------------------------------------------
@@ -105,16 +97,4 @@ public class ProcessEnablementService implements EnablementPolicy {
         return true;
     }
 
-    /**
-     * Same as {@link #resolveDefault} but swallows all exceptions — used in the
-     * outer fail-safe catch block where we must not throw again.
-     */
-    private boolean safeDefault(String processId) {
-        try {
-            return resolveDefault(processId);
-        } catch (Exception ex) {
-            LOG.warnf(ex, "safeDefault also failed for process=%s; returning true", processId);
-            return true;
-        }
-    }
 }

@@ -8,7 +8,10 @@ import io.github.chirino.memory.grpc.v1.EventStreamServiceGrpc;
 import io.github.chirino.memory.grpc.v1.SubscribeEventsRequest;
 import io.github.rigazilla.memory.cognition.config.CognitionConfig;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
+import io.github.rigazilla.memory.cognition.enablement.EnablementContext;
+import io.github.rigazilla.memory.cognition.enablement.EnablementPolicy;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
+import io.github.rigazilla.memory.cognition.process.DurableMemoryExtractionProcess;
 import io.grpc.CallCredentials;
 import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
@@ -23,7 +26,9 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -66,6 +71,9 @@ public class GrpcAdminEventClient {
 
     @Inject
     SalienceScorer salienceScorer;
+
+    @Inject
+    EnablementPolicy enablementPolicy;
 
     @Inject
     ObjectMapper objectMapper;
@@ -273,18 +281,36 @@ public class GrpcAdminEventClient {
 
             // Accept event into dirty window registry (if it has a conversation ID)
             if (conversationId != null && cursor != null) {
-                // Salience gate: filter low-salience events before opening a debounce window
-                // Events with no extractable user text pass through conservatively
-                // A scorer failure must never drop an event — default to keep on any exception
-                boolean keep;
-                try {
-                    keep = salienceScorer.shouldKeep(extractEntryText(rootNode));
-                } catch (Exception e) {
-                    LOG.warnf(e, "salienceScorer.shouldKeep failed — passing event through conservatively");
-                    keep = true;
-                }
-                if (keep) {
-                    windowRegistry.acceptEvent(conversationId, cursor, entryId, Instant.now());
+                // Enablement gate — keyed on this consumer's process id, not a stream-wide flag.
+                // Cursor advancement and saveCheckpoint() remain unconditional so the stream
+                // stays consistent and a second consumer (#58) can be gated independently.
+                EnablementContext enablementCtx = new EnablementContext(
+                        DurableMemoryExtractionProcess.PROCESS_ID,
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.ofNullable(conversationId),
+                        Map.of());
+                if (!enablementPolicy.decide(enablementCtx).enabled()) {
+                    LOG.debugf("durable-memory-extraction disabled — dropping event for conversation %s",
+                            conversationId);
+                } else {
+                    // Salience gate: filter low-salience events before opening a debounce window.
+                    // Events with no extractable user text pass through (see SalienceScorer#shouldKeep).
+                    // Fail-open guard: no specific exception is expected from the scorer today
+                    // (extractEntryText handles its own failures; shouldKeep only runs precompiled
+                    // regexes and counters). Dropping an event is unrecoverable, whereas keeping a
+                    // low-salience one only costs an extra extraction, so any unexpected
+                    // RuntimeException passes the event through instead of dropping it.
+                    boolean keep;
+                    try {
+                        keep = salienceScorer.shouldKeep(extractEntryText(rootNode));
+                    } catch (RuntimeException e) {
+                        LOG.errorf(e, "salienceScorer.shouldKeep failed — passing event through conservatively");
+                        keep = true;
+                    }
+                    if (keep) {
+                        windowRegistry.acceptEvent(conversationId, cursor, entryId, Instant.now());
+                    }
                 }
             }
             

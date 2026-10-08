@@ -5,6 +5,7 @@ import io.github.chirino.memory.grpc.v1.EventScope;
 import io.github.chirino.memory.grpc.v1.EventStreamServiceGrpc;
 import io.github.chirino.memory.grpc.v1.SubscribeEventsRequest;
 import io.github.rigazilla.memory.cognition.config.CognitionConfig;
+import io.github.rigazilla.memory.cognition.enablement.ProcessEnablementService;
 import io.grpc.CallCredentials;
 import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
@@ -64,6 +65,9 @@ class GrpcAdminEventClientTest {
 
     @InjectMock
     DirtyWindowRegistry windowRegistry;
+
+    @Inject
+    ProcessEnablementService enablementService;
 
     @BeforeEach
     void setUp() {
@@ -715,6 +719,81 @@ class GrpcAdminEventClientTest {
                     eq("a1b2c3d4-5678-9abc-def0-123456789012"),
                     any(Instant.class)
             );
+        }
+    
+        // -------------------------------------------------------------------------
+        // Enablement gate — verifies the durable-memory-extraction gate in handleEvent
+        // -------------------------------------------------------------------------
+    
+        @Nested
+        class EnablementGate {
+    
+            @BeforeEach
+            void resetEnablement() {
+                ProcessEnablementService real = (ProcessEnablementService)
+                        ((io.quarkus.arc.ClientProxy) enablementService).arc_contextualInstance();
+                real.resetOverrides();
+                // Also reset event counter so cursor/checkpoint assertions stay clean
+                realClient.eventsAccepted.set(0);
+            }
+    
+            private EventNotification conversationEvent(String conversationId, String cursor) {
+                return EventNotification.newBuilder()
+                        .setEvent("entry.created")
+                        .setKind("entry")
+                        .setCursor(cursor)
+                        .setData(com.google.protobuf.ByteString.copyFromUtf8(
+                                "{\"conversationId\":\"" + conversationId + "\"}"))
+                        .build();
+            }
+    
+            @Test
+            void enabled_acceptEventIsCalled() {
+                // Default state: process is enabled → acceptEvent must be called
+                client.handleEvent(conversationEvent("conv-1", "cur-1"));
+    
+                verify(windowRegistry).acceptEvent(eq("conv-1"), eq("cur-1"), any(), any(Instant.class));
+            }
+    
+            @Test
+            void disabled_acceptEventIsNotCalled() {
+                enablementService.disable("durable-memory-extraction");
+    
+                client.handleEvent(conversationEvent("conv-1", "cur-1"));
+    
+                verify(windowRegistry, never()).acceptEvent(anyString(), anyString(), anyString(), any());
+            }
+    
+            @Test
+            void disabled_cursorStillAdvances() {
+                enablementService.disable("durable-memory-extraction");
+    
+                client.handleEvent(conversationEvent("conv-1", "cur-disabled"));
+    
+                assertEquals("cur-disabled", realClient.lastEventCursor,
+                        "Cursor must advance even when the process is disabled");
+            }
+    
+            @Test
+            void disabled_thenEnabled_acceptEventResumes() {
+                enablementService.disable("durable-memory-extraction");
+                client.handleEvent(conversationEvent("conv-1", "cur-1"));
+                verify(windowRegistry, never()).acceptEvent(anyString(), anyString(), anyString(), any());
+    
+                enablementService.enable("durable-memory-extraction");
+                client.handleEvent(conversationEvent("conv-1", "cur-2"));
+                verify(windowRegistry).acceptEvent(eq("conv-1"), eq("cur-2"), any(), any(Instant.class));
+            }
+    
+            @Test
+            void disabled_doesNotAffectOtherProcessIds() {
+                // Disabling a different process must not gate durable-memory-extraction
+                enablementService.disable("metadata-enrichment");
+    
+                client.handleEvent(conversationEvent("conv-1", "cur-1"));
+    
+                verify(windowRegistry).acceptEvent(eq("conv-1"), eq("cur-1"), any(), any(Instant.class));
+            }
         }
     }
 }

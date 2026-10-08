@@ -1,6 +1,7 @@
 package io.github.rigazilla.memory.cognition.enablement;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -16,6 +17,10 @@ public record EnablementContext(
         Optional<String> clientId,
         Optional<String> conversationId,
         Map<String, String> attributes) {
+
+    public EnablementContext {
+        Objects.requireNonNull(processId, "processId");
+    }
 
     /**
      * Convenience factory for call sites that only have a process id.

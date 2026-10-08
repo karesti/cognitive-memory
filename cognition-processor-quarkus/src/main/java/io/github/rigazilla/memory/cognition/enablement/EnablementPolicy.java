@@ -15,10 +15,7 @@ public interface EnablementPolicy {
     /**
      * Decide whether the process described by {@code ctx} should run.
      *
-     * <p>Must never throw. Implementations that encounter an unexpected error
-     * must fall back to the process default and log at WARN.
-     *
-     * @param ctx context for the decision; {@code ctx.processId()} is always present
+     * @param ctx context for the decision; {@code ctx.processId()} is never null
      * @return the decision with a human-readable reason for observability
      */
     EnablementDecision decide(EnablementContext ctx);

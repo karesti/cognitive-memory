@@ -44,6 +44,11 @@ class EnablementTypesTest {
         assertEquals("v", ctx.attributes().get("k"));
     }
 
+    @Test
+    void nullProcessIdIsRejected() {
+        assertThrows(NullPointerException.class, () -> EnablementContext.of(null));
+    }
+
     // -------------------------------------------------------------------------
     // EnablementDecision
     // -------------------------------------------------------------------------
