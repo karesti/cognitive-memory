@@ -53,10 +53,23 @@ public interface CognitiveProcess {
     /**
      * Get resource requirements for this process.
      * Returns null to use global defaults only.
-     * 
+     *
      * @return The resource requirements, or null for global defaults
      */
     default ResourceRequirements getResourceRequirements() {
         return null;
+    }
+
+    /**
+     * Default enablement when nothing has toggled this process at runtime.
+     *
+     * <p>Processes that should be off-by-default (e.g. benchmarking baselines) can
+     * override this to return {@code false}. All v1 processes keep {@code true},
+     * preserving today's always-on behaviour.
+     *
+     * @return {@code true} if this process should run when no explicit toggle has been set
+     */
+    default boolean defaultEnabled() {
+        return true;
     }
 }
