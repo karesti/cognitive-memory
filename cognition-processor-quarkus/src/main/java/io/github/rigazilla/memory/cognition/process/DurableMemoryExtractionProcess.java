@@ -1,5 +1,6 @@
 package io.github.rigazilla.memory.cognition.process;
 
+import io.github.rigazilla.memory.cognition.enablement.ProcessEnablementService;
 import io.github.rigazilla.memory.cognition.event.GrpcAdminEventClient;
 import io.github.rigazilla.memory.cognition.extraction.DurableMemoryExtractor;
 import io.github.rigazilla.memory.cognition.queue.JobQueueRegistry;
@@ -26,6 +27,9 @@ public class DurableMemoryExtractionProcess implements CognitiveProcess {
 
     private static final Logger LOG = Logger.getLogger(DurableMemoryExtractionProcess.class);
     public static final String PROCESS_ID = "durable-memory-extraction";
+
+    @Inject
+    ProcessEnablementService enablementService;
 
     @Inject
     GrpcAdminEventClient eventClient;
@@ -80,17 +84,28 @@ public class DurableMemoryExtractionProcess implements CognitiveProcess {
 
     @Override
     public boolean supportsEnable() {
-        return false;
+        return true;
     }
 
     @Override
     public boolean supportsDisable() {
-        return false;
+        return true;
     }
 
     @Override
     public ManagedProcessState state() {
-        return ManagedProcessState.ENABLED;
+        return enablementService.isEnabled(id())
+                ? ManagedProcessState.ENABLED : ManagedProcessState.DISABLED;
+    }
+
+    @Override
+    public void enable() {
+        enablementService.enable(id());
+    }
+
+    @Override
+    public void disable() {
+        enablementService.disable(id());
     }
 
     @Override

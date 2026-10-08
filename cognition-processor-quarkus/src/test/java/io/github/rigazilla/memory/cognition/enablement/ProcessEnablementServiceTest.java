@@ -21,15 +21,12 @@ class ProcessEnablementServiceTest {
     @Inject
     ProcessEnablementService service;
 
-    /** Real (unwrapped) bean — needed to reset internal state between tests. */
-    private ProcessEnablementService realService;
-
     @BeforeEach
     void setUp() {
         // Unwrap CDI proxy to reset the overrides map between tests
-        realService = (ProcessEnablementService)
+        ProcessEnablementService realService = (ProcessEnablementService)
                 ((io.quarkus.arc.ClientProxy) service).arc_contextualInstance();
-        realService.overrides.clear();
+        realService.resetOverrides();
     }
 
     // -------------------------------------------------------------------------

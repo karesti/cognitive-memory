@@ -61,6 +61,11 @@ public class ProcessEnablementService implements EnablementPolicy {
     // Mutable toggle
     // -------------------------------------------------------------------------
 
+    /** Clear all runtime overrides, restoring all processes to their defaults. For test use only. */
+    public void resetOverrides() {
+        overrides.clear();
+    }
+
     /** Mark the process as enabled. Idempotent. */
     public void enable(String processId) {
         overrides.put(processId, Boolean.TRUE);
