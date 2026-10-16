@@ -61,6 +61,8 @@ Do not require runtime `details` for every process. If a process has no meaningf
 
 ## Testing
 
+For full testing guidelines see [AI-TEST.md](AI-TEST.md). For coding guidelines see [AI-CODE.md](AI-CODE.md).
+
 Use **`@QuarkusTest`** for all tests involving CDI beans (`@ApplicationScoped`, `@RequestScoped`, etc.). This starts a real Quarkus container that resolves `@ConfigMapping` interfaces from `src/test/resources/application.properties` — no manual config wiring needed.
 
 ### Injection pattern

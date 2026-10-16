@@ -6,6 +6,7 @@ import io.github.rigazilla.memory.cognition.extraction.DurableMemoryExtractor;
 import io.github.rigazilla.memory.cognition.queue.JobQueueRegistry;
 import io.github.rigazilla.memory.cognition.resource.LlmResourceConfiguration;
 import io.github.rigazilla.memory.cognition.resource.ResourceRequirements;
+import io.github.rigazilla.memory.cognition.token.TokenTracker;
 import io.github.rigazilla.memory.cognition.verification.DurableMemoryVerifier;
 import io.quarkiverse.langchain4j.RegisterAiService;
 import jakarta.annotation.PostConstruct;
@@ -39,6 +40,9 @@ public class DurableMemoryExtractionProcess implements CognitiveProcess {
 
     @Inject
     Config config;
+
+    @Inject
+    TokenTracker tokenTracker;
 
     private String extractorPrompt;
     private String verifierPrompt;
@@ -122,11 +126,11 @@ public class DurableMemoryExtractionProcess implements CognitiveProcess {
         // Add resource type information with prompts
         ResourceRequirements requirements = getResourceRequirements();
         if (requirements != null) {
-            Map<String, Map<String, String>> resourceTypes = new LinkedHashMap<>();
+            Map<String, Map<String, Object>> resourceTypes = new LinkedHashMap<>();
             requirements.getAllResources().forEach((name, resourceConfig) -> {
-                Map<String, String> resourceInfo = new LinkedHashMap<>();
+                Map<String, Object> resourceInfo = new LinkedHashMap<>();
                 resourceInfo.put("type", resourceConfig.getType().name());
-                
+
                 // Add LLM details from the actual AI service annotation
                 if (resourceConfig.getType() == io.github.rigazilla.memory.cognition.resource.ResourceType.LLM) {
                     Class<?> aiServiceClass = switch (name) {
@@ -137,7 +141,7 @@ public class DurableMemoryExtractionProcess implements CognitiveProcess {
                     if (aiServiceClass != null) {
                         addLlmDetails(resourceInfo, aiServiceClass);
                     }
-                    
+
                     String promptContent = switch (name) {
                         case "extractor" -> extractorPrompt;
                         case "verifier" -> verifierPrompt;
@@ -146,12 +150,15 @@ public class DurableMemoryExtractionProcess implements CognitiveProcess {
                     if (promptContent != null) {
                         resourceInfo.put("prompt", promptContent);
                     }
+
+                    resourceInfo.put("tokenUsage", tokenTracker.snapshot(id(), name));
                 }
-                
+
                 resourceTypes.put(name, resourceInfo);
             });
             details.put("resourceTypes", resourceTypes);
         }
+        details.put("tokenUsage", tokenTracker.processSnapshot(id()));
 
         return new ManagedProcessInspection(
             id(),
@@ -172,7 +179,7 @@ public class DurableMemoryExtractionProcess implements CognitiveProcess {
      * Populate LLM resource info by reading the modelName from the @RegisterAiService annotation
      * and resolving the actual provider, model, and endpoint from Quarkus config.
      */
-    private void addLlmDetails(Map<String, String> resourceInfo, Class<?> aiServiceClass) {
+    private void addLlmDetails(Map<String, Object> resourceInfo, Class<?> aiServiceClass) {
         RegisterAiService annotation = aiServiceClass.getAnnotation(RegisterAiService.class);
         if (annotation == null) {
             return;

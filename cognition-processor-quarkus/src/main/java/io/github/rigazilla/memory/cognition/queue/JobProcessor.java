@@ -17,10 +17,13 @@ import io.github.rigazilla.memory.cognition.extraction.DurableExtractionResponse
 import io.github.rigazilla.memory.cognition.extraction.DurableMemoryExtractor;
 import io.github.rigazilla.memory.cognition.extraction.MemoryCandidate;
 import io.github.rigazilla.memory.cognition.config.CognitionConfig;
+import io.github.rigazilla.memory.cognition.process.DurableMemoryExtractionProcess;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.github.rigazilla.memory.cognition.model.Provenance;
 import io.github.rigazilla.memory.cognition.resource.LlmRetryHelper;
+import io.github.rigazilla.memory.cognition.token.TokenTracker;
+import io.github.rigazilla.memory.cognition.token.TokenTrackingContext;
 import io.github.rigazilla.memory.cognition.verification.DurableMemoryVerifier;
 import io.github.rigazilla.memory.cognition.verification.DurableVerificationResponse;
 import io.github.rigazilla.memory.cognition.writer.MemoryWriter;
@@ -90,6 +93,9 @@ public class JobProcessor {
 
     @Inject
     LlmRetryHelper llmRetryHelper;
+
+    @Inject
+    TokenTracker tokenTracker;
 
     @Inject
     ConsolidationService consolidationService;
@@ -265,9 +271,15 @@ public class JobProcessor {
                 }
             }
 
-            DurableExtractionResponse extraction = llmRetryHelper.withRetry(
-                    "extraction:" + job.conversationId(),
-                    () -> extractor.extract(evidenceText));
+            TokenTrackingContext.set(DurableMemoryExtractionProcess.PROCESS_ID, "extractor");
+            DurableExtractionResponse extraction;
+            try {
+                extraction = llmRetryHelper.withRetry(
+                        "extraction:" + job.conversationId(),
+                        () -> extractor.extract(evidenceText));
+            } finally {
+                TokenTrackingContext.clear();
+            }
 
             int rawTotal = extraction.getTotalCount();
             List<MemoryCandidate> validCandidates = extraction.getAllCandidates();
@@ -328,9 +340,15 @@ public class JobProcessor {
 
             LOG.infof("  [4/6] Verifying memory candidates");
             String candidatesJson = objectMapper.writeValueAsString(deduplicatedCandidates);
-            DurableVerificationResponse verification = llmRetryHelper.withRetry(
-                    "verification:" + job.conversationId(),
-                    () -> verifier.verify(candidatesJson, evidenceText));
+            TokenTrackingContext.set(DurableMemoryExtractionProcess.PROCESS_ID, "verifier");
+            DurableVerificationResponse verification;
+            try {
+                verification = llmRetryHelper.withRetry(
+                        "verification:" + job.conversationId(),
+                        () -> verifier.verify(candidatesJson, evidenceText));
+            } finally {
+                TokenTrackingContext.clear();
+            }
             LOG.infof("  ✓ Verification complete: verified=%d, rejected=%d",
                 verification.verified().size(),
                 verification.rejected().size());

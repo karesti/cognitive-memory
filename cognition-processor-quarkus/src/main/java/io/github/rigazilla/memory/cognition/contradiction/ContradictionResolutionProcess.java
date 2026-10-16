@@ -6,6 +6,7 @@ import io.github.rigazilla.memory.cognition.process.ManagedProcessInspection;
 import io.github.rigazilla.memory.cognition.process.ManagedProcessState;
 import io.github.rigazilla.memory.cognition.resource.DefaultLlmResourceConfiguration;
 import io.github.rigazilla.memory.cognition.resource.ResourceRequirements;
+import io.github.rigazilla.memory.cognition.token.TokenTracker;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -36,6 +37,9 @@ public class ContradictionResolutionProcess implements CognitiveProcess {
 
     @Inject
     CognitionConfig cognition;
+
+    @Inject
+    TokenTracker tokenTracker;
 
     // -------------------------------------------------------------------------
     // CognitiveProcess identity
@@ -117,9 +121,9 @@ public class ContradictionResolutionProcess implements CognitiveProcess {
 
         ResourceRequirements requirements = getResourceRequirements();
         if (requirements != null) {
-            Map<String, Map<String, String>> resourceTypes = new LinkedHashMap<>();
+            Map<String, Map<String, Object>> resourceTypes = new LinkedHashMap<>();
             requirements.getAllResources().forEach((name, resourceConfig) -> {
-                Map<String, String> resourceInfo = new LinkedHashMap<>();
+                Map<String, Object> resourceInfo = new LinkedHashMap<>();
                 resourceInfo.put("type", resourceConfig.getType().name());
                 try {
                     String prompt = new String(
@@ -132,10 +136,12 @@ public class ContradictionResolutionProcess implements CognitiveProcess {
                     LOG.warnf("Failed to load contradiction detector prompt: %s", e.getMessage());
                     resourceInfo.put("prompt", "Error loading prompt");
                 }
+                resourceInfo.put("tokenUsage", tokenTracker.snapshot(id(), name));
                 resourceTypes.put(name, resourceInfo);
             });
             details.put("resourceTypes", resourceTypes);
         }
+        details.put("tokenUsage", tokenTracker.processSnapshot(id()));
 
         return new ManagedProcessInspection(id(), displayName(), description(), state(), details);
     }

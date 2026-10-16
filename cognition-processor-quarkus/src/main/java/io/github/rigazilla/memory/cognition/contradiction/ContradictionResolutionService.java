@@ -13,6 +13,7 @@ import io.github.rigazilla.memory.cognition.config.CognitionConfig;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.github.rigazilla.memory.cognition.resource.LlmRetryHelper;
+import io.github.rigazilla.memory.cognition.token.TokenTrackingContext;
 import io.grpc.ManagedChannel;
 import io.quarkus.arc.Arc;
 import io.quarkus.arc.ManagedContext;
@@ -296,10 +297,11 @@ public class ContradictionResolutionService {
 
             ContradictionDetectionResponse response = llmRetryHelper.withRetry(
                     "contradiction-detect:" + pair.keyA() + ":" + pair.keyB(),
-                    () -> detector.detect(
-                            pair.memoryType(),
-                            pair.contentA(), nullSafe(pair.observedAtA()),
-                            pair.contentB(), nullSafe(pair.observedAtB())));
+                    () -> TokenTrackingContext.call(ContradictionResolutionProcess.PROCESS_ID, "detector",
+                            () -> detector.detect(
+                                    pair.memoryType(),
+                                    pair.contentA(), nullSafe(pair.observedAtA()),
+                                    pair.contentB(), nullSafe(pair.observedAtB()))));
 
             if (!response.contradicts()) {
                 return;

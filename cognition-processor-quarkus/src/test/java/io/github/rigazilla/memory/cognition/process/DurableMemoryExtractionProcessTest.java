@@ -3,6 +3,8 @@ package io.github.rigazilla.memory.cognition.process;
 import io.github.rigazilla.memory.cognition.enablement.ProcessEnablementService;
 import io.github.rigazilla.memory.cognition.event.GrpcAdminEventClient;
 import io.github.rigazilla.memory.cognition.queue.JobQueueRegistry;
+import io.github.rigazilla.memory.cognition.token.TokenTracker;
+import io.github.rigazilla.memory.cognition.token.TokenUsage;
 import io.quarkus.arc.ClientProxy;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
@@ -29,6 +31,9 @@ class DurableMemoryExtractionProcessTest {
 
     @Inject
     ProcessEnablementService enablementService;
+
+    @Inject
+    TokenTracker tokenTracker;
 
     @InjectMock
     GrpcAdminEventClient eventClient;
@@ -109,5 +114,44 @@ class DurableMemoryExtractionProcessTest {
 
         process.disable();
         assertEquals(ManagedProcessState.DISABLED, process.inspect().state());
+    }
+
+    // -------------------------------------------------------------------------
+    // inspect() resource tokenUsage
+    // -------------------------------------------------------------------------
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void inspectResourceTypesContainTokenUsageForExtractorAndVerifier() {
+        ManagedProcessInspection inspection = process.inspect();
+
+        java.util.Map<String, java.util.Map<String, Object>> resourceTypes =
+                (java.util.Map<String, java.util.Map<String, Object>>)
+                        inspection.details().get("resourceTypes");
+        assertNotNull(resourceTypes, "resourceTypes must be present in inspect details");
+
+        java.util.Map<String, Object> extractor = resourceTypes.get("extractor");
+        assertNotNull(extractor, "extractor resource must be present");
+        assertTrue(extractor.containsKey("tokenUsage"),
+                "extractor resource must include tokenUsage");
+
+        java.util.Map<String, Object> verifier = resourceTypes.get("verifier");
+        assertNotNull(verifier, "verifier resource must be present");
+        assertTrue(verifier.containsKey("tokenUsage"),
+                "verifier resource must include tokenUsage");
+    }
+
+    @Test
+    void inspectContainsProcessLevelTokenUsageAggregatingResources() {
+        String id = DurableMemoryExtractionProcess.PROCESS_ID;
+        long before = tokenTracker.processSnapshot(id).totalTokens();
+        tokenTracker.record(id, "extractor", 100, 50);
+        tokenTracker.record(id, "verifier", 20, 10);
+
+        ManagedProcessInspection inspection = process.inspect();
+
+        Object usage = inspection.details().get("tokenUsage");
+        assertNotNull(usage, "process-level tokenUsage must be present");
+        assertEquals(before + 180L, ((TokenUsage.Snapshot) usage).totalTokens());
     }
 }

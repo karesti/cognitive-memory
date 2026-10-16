@@ -12,9 +12,12 @@ import io.github.chirino.memory.grpc.v1.AdminPutMemoryRequest;
 import io.github.chirino.memory.grpc.v1.MemoryNamespace;
 import io.grpc.ManagedChannel;
 import io.github.rigazilla.memory.cognition.config.CognitionConfig;
+import io.github.rigazilla.memory.cognition.process.MetadataEnrichmentProcess;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.github.rigazilla.memory.cognition.resource.LlmRetryHelper;
+import io.github.rigazilla.memory.cognition.token.TokenTracker;
+import io.github.rigazilla.memory.cognition.token.TokenTrackingContext;
 import io.quarkus.arc.Arc;
 import io.quarkus.arc.ManagedContext;
 import jakarta.annotation.PostConstruct;
@@ -55,6 +58,9 @@ public class MetadataEnrichmentService {
 
     @Inject
     LlmRetryHelper llmRetryHelper;
+
+    @Inject
+    TokenTracker tokenTracker;
 
     // Package-private for test injection (same pattern as TemporalMetadataEnrichmentService)
     ManagedChannel channel;
@@ -270,9 +276,15 @@ public class MetadataEnrichmentService {
             }
 
             // Call LLM to extract entities and topics — wrapped with retry/backoff
-            MetadataExtractionResponse extraction = llmRetryHelper.withRetry(
-                    "metadata-extraction:" + item.getKey(),
-                    () -> extractor.extract(memoryType, content));
+            TokenTrackingContext.set(MetadataEnrichmentProcess.PROCESS_ID, "extractor");
+            MetadataExtractionResponse extraction;
+            try {
+                extraction = llmRetryHelper.withRetry(
+                        "metadata-extraction:" + item.getKey(),
+                        () -> extractor.extract(memoryType, content));
+            } finally {
+                TokenTrackingContext.clear();
+            }
 
             // Write back: copy all existing fields and add entities + topics
             Struct updatedValue = value.toBuilder()

@@ -1,6 +1,7 @@
 package io.github.rigazilla.memory.cognition.process;
 
 import io.github.rigazilla.memory.cognition.metadata.MetadataEnrichmentService;
+import io.github.rigazilla.memory.cognition.token.TokenTracker;
 import org.eclipse.microprofile.config.Config;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,6 +46,7 @@ class MetadataEnrichmentProcessTest {
         process = new MetadataEnrichmentProcess();
         process.enrichmentService = mockService;
         process.config = mockConfig;
+        process.tokenTracker = new TokenTracker();
     }
 
     // -------------------------------------------------------------------------
@@ -180,6 +182,21 @@ class MetadataEnrichmentProcessTest {
         ManagedProcessInspection result = process.inspect();
         assertTrue(result.details().containsKey("resourceTypes"),
                 "inspect payload must include 'resourceTypes' from getResourceRequirements()");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void inspectExtractorResourceContainsTokenUsage() {
+        ManagedProcessInspection result = process.inspect();
+
+        Map<String, Map<String, Object>> resourceTypes =
+                (Map<String, Map<String, Object>>) result.details().get("resourceTypes");
+        assertNotNull(resourceTypes, "resourceTypes must not be null");
+
+        Map<String, Object> extractor = resourceTypes.get("extractor");
+        assertNotNull(extractor, "extractor resource must be present");
+        assertTrue(extractor.containsKey("tokenUsage"),
+                "extractor resource must expose 'tokenUsage'");
     }
 
     // -------------------------------------------------------------------------

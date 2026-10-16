@@ -8,6 +8,7 @@ import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
 import io.github.chirino.memory.grpc.v1.MemoryItem;
 import io.github.rigazilla.memory.cognition.resource.LlmRetryHelper;
+import io.github.rigazilla.memory.cognition.token.TokenTrackingContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -62,7 +63,8 @@ public class LlmBasedConsolidationStrategy implements ProfileConsolidationStrate
             // Step 3: Invoke LLM consolidator — wrapped with retry/backoff
             ProfileConsolidationResponse response = llmRetryHelper.withRetry(
                     "profile-consolidation:" + userId,
-                    () -> consolidator.consolidate(memoriesJson));
+                    () -> TokenTrackingContext.call(ProfileContextConsolidationProcess.PROCESS_ID, "consolidator",
+                            () -> consolidator.consolidate(memoriesJson)));
             LOG.infof("LLM consolidation complete for user %s", userId);
             
             // Step 4: Convert to ProfileSnapshot

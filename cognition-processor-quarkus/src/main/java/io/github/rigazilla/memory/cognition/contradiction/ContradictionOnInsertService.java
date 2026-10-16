@@ -15,6 +15,7 @@ import io.github.rigazilla.memory.cognition.config.CognitionConfig;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.github.rigazilla.memory.cognition.resource.LlmRetryHelper;
+import io.github.rigazilla.memory.cognition.token.TokenTrackingContext;
 import io.grpc.ManagedChannel;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -198,7 +199,8 @@ public class ContradictionOnInsertService {
         try {
             ContradictionBatchResult batchResult = llmRetryHelper.withRetry(
                     "contradiction-detect-batch:" + newItem.getKey(),
-                    () -> detector.detectBatch(memoryType, newContent, newObservedAt, candidatesJson));
+                    () -> TokenTrackingContext.call(ContradictionResolutionProcess.PROCESS_ID, "detector",
+                            () -> detector.detectBatch(memoryType, newContent, newObservedAt, candidatesJson)));
             batchResults = (batchResult != null) ? batchResult.results() : null;
         } catch (Exception e) {
             LOG.warnf(e, "Batch contradiction detection failed for key=%s; falling back to per-pair",
@@ -255,10 +257,11 @@ public class ContradictionOnInsertService {
 
             ContradictionDetectionResponse response = llmRetryHelper.withRetry(
                     "contradiction-detect:" + pair.keyA() + ":" + pair.keyB(),
-                    () -> detector.detect(
-                            pair.memoryType(),
-                            pair.contentA(), nullSafe(pair.observedAtA()),
-                            pair.contentB(), nullSafe(pair.observedAtB())));
+                    () -> TokenTrackingContext.call(ContradictionResolutionProcess.PROCESS_ID, "detector",
+                            () -> detector.detect(
+                                    pair.memoryType(),
+                                    pair.contentA(), nullSafe(pair.observedAtA()),
+                                    pair.contentB(), nullSafe(pair.observedAtB()))));
 
             applyDetectionResponse(newItem, neighbour, memoryType, response);
 

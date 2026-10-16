@@ -59,13 +59,16 @@ This approach allows seamless Prometheus integration in future phases via Quarku
 
 ### Success Criteria (Proposal)
 
-- [ ] Each cognitive process exposes token metrics via `inspect()`
-- [ ] Separate counters for each LLM resource (extractor, verifier)
-- [ ] Metrics include: input/output/total tokens, request count, average
-- [ ] Thread-safe implementation (use atomic counters)
-- [ ] Works with both Ollama and OpenAI providers
-- [ ] No performance degradation
-- [ ] Token metrics appear in process inspection API response
+Phase 1 is implemented, see `../DONE/026-token-tracking-implementation.md`.
+
+- [x] Each cognitive process exposes token metrics via `inspect()` (per resource and per process)
+- [x] Separate counters for each LLM resource (extractor, verifier)
+- [x] Metrics include: input/output/total tokens, request count, average
+- [x] Thread-safe implementation (use atomic counters)
+- [ ] Works with both Ollama and OpenAI providers (listener is provider-agnostic; not yet verified against live providers)
+- [ ] No performance degradation (not measured)
+- [x] Token metrics appear in process inspection API response
+- [x] Prometheus counters with `process`, `resource`, `provider`, `model` labels on `/q/metrics`
 
 ### Expected API Response Format (Proposal)
 
