@@ -110,9 +110,6 @@ public class TokenTracker {
 
     private void publish(String processId, String resourceName, String provider, String model,
             Integer inputTokens, Integer outputTokens) {
-        if (meterRegistry == null) {
-            return;
-        }
         long in = inputTokens != null ? inputTokens : 0L;
         long out = outputTokens != null ? outputTokens : 0L;
         String[] tags = {

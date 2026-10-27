@@ -276,15 +276,11 @@ public class MetadataEnrichmentService {
             }
 
             // Call LLM to extract entities and topics — wrapped with retry/backoff
-            TokenTrackingContext.set(MetadataEnrichmentProcess.PROCESS_ID, "extractor");
-            MetadataExtractionResponse extraction;
-            try {
-                extraction = llmRetryHelper.withRetry(
-                        "metadata-extraction:" + item.getKey(),
-                        () -> extractor.extract(memoryType, content));
-            } finally {
-                TokenTrackingContext.clear();
-            }
+            MetadataExtractionResponse extraction = TokenTrackingContext.call(
+                    MetadataEnrichmentProcess.PROCESS_ID, "extractor",
+                    () -> llmRetryHelper.withRetry(
+                            "metadata-extraction:" + item.getKey(),
+                            () -> extractor.extract(memoryType, content)));
 
             // Write back: copy all existing fields and add entities + topics
             Struct updatedValue = value.toBuilder()

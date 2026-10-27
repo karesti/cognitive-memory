@@ -271,15 +271,11 @@ public class JobProcessor {
                 }
             }
 
-            TokenTrackingContext.set(DurableMemoryExtractionProcess.PROCESS_ID, "extractor");
-            DurableExtractionResponse extraction;
-            try {
-                extraction = llmRetryHelper.withRetry(
-                        "extraction:" + job.conversationId(),
-                        () -> extractor.extract(evidenceText));
-            } finally {
-                TokenTrackingContext.clear();
-            }
+            DurableExtractionResponse extraction = TokenTrackingContext.call(
+                    DurableMemoryExtractionProcess.PROCESS_ID, "extractor",
+                    () -> llmRetryHelper.withRetry(
+                            "extraction:" + job.conversationId(),
+                            () -> extractor.extract(evidenceText)));
 
             int rawTotal = extraction.getTotalCount();
             List<MemoryCandidate> validCandidates = extraction.getAllCandidates();
@@ -340,15 +336,11 @@ public class JobProcessor {
 
             LOG.infof("  [4/6] Verifying memory candidates");
             String candidatesJson = objectMapper.writeValueAsString(deduplicatedCandidates);
-            TokenTrackingContext.set(DurableMemoryExtractionProcess.PROCESS_ID, "verifier");
-            DurableVerificationResponse verification;
-            try {
-                verification = llmRetryHelper.withRetry(
-                        "verification:" + job.conversationId(),
-                        () -> verifier.verify(candidatesJson, evidenceText));
-            } finally {
-                TokenTrackingContext.clear();
-            }
+            DurableVerificationResponse verification = TokenTrackingContext.call(
+                    DurableMemoryExtractionProcess.PROCESS_ID, "verifier",
+                    () -> llmRetryHelper.withRetry(
+                            "verification:" + job.conversationId(),
+                            () -> verifier.verify(candidatesJson, evidenceText)));
             LOG.infof("  ✓ Verification complete: verified=%d, rejected=%d",
                 verification.verified().size(),
                 verification.rejected().size());

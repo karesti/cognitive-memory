@@ -1,6 +1,7 @@
 package io.github.rigazilla.memory.cognition.token;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -9,11 +10,19 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Unit tests for {@link TokenTracker}.
  *
  * <p>Pure JUnit 5 — no CDI container required.
- * {@link TokenTracker} is instantiated directly because it has no CDI-injected fields.
+ * {@link TokenTracker} is instantiated directly with a {@link SimpleMeterRegistry}
+ * wired in to mirror the CDI contract (the container always satisfies
+ * {@code @Inject MeterRegistry} in production).
  */
 class TokenTrackerTest {
 
-    private TokenTracker tracker = new TokenTracker();
+    private TokenTracker tracker;
+
+    @BeforeEach
+    void setUp() {
+        tracker = new TokenTracker();
+        tracker.meterRegistry = new SimpleMeterRegistry();
+    }
 
     // -------------------------------------------------------------------------
     // snapshot() before any record
@@ -140,8 +149,7 @@ class TokenTrackerTest {
 
     @Test
     void recordPublishesLabelledMicrometerCounters() {
-        SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        tracker.meterRegistry = registry;
+        SimpleMeterRegistry registry = (SimpleMeterRegistry) tracker.meterRegistry;
 
         tracker.record("proc", "extractor", "OLLAMA", "llama3.2", 100, 50);
         tracker.record("proc", "extractor", "OLLAMA", "llama3.2", 10, 5);
@@ -154,8 +162,7 @@ class TokenTrackerTest {
 
     @Test
     void missingProviderAndModelAreLabelledUnknown() {
-        SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        tracker.meterRegistry = registry;
+        SimpleMeterRegistry registry = (SimpleMeterRegistry) tracker.meterRegistry;
 
         tracker.record("proc", "extractor", 7, 3);
 
@@ -164,8 +171,7 @@ class TokenTrackerTest {
 
     @Test
     void differentModelsGetSeparateMicrometerSeries() {
-        SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        tracker.meterRegistry = registry;
+        SimpleMeterRegistry registry = (SimpleMeterRegistry) tracker.meterRegistry;
 
         tracker.record("proc", "extractor", "OLLAMA", "llama3.2", 100, 0);
         tracker.record("proc", "extractor", "OPEN_AI", "gpt-4o", 5, 0);

@@ -72,11 +72,14 @@ class TokenUsageListenerTest {
     }
 
     @Test
-    void ignoresResponsesWithoutTokenUsage() {
+    void countsRequestEvenWhenTokenUsageIsNull() {
         TokenTrackingContext.set("proc", "extractor");
 
         listener.onResponse(responseWith(null));
 
-        assertThat(tracker.snapshot("proc", "extractor").requestCount()).isZero();
+        // The request must be counted even when the provider does not report token usage,
+        // otherwise requestCount is deflated and averageTokensPerRequest is inflated.
+        assertThat(tracker.snapshot("proc", "extractor").requestCount()).isEqualTo(1);
+        assertThat(tracker.snapshot("proc", "extractor").totalTokens()).isZero();
     }
 }

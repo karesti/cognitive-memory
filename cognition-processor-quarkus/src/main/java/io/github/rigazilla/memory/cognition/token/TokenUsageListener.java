@@ -45,19 +45,23 @@ public class TokenUsageListener implements ChatModelListener {
             return;
         }
         TokenUsage usage = responseContext.chatResponse().tokenUsage();
-        if (usage == null) {
-            LOG.debugf("No token usage in response for %s/%s — provider may not report tokens",
-                    entry.processId(), entry.resourceName());
-            return;
-        }
         ModelProvider provider = responseContext.modelProvider();
+        // Record the request even when usage is null — the request still happened.
+        // TokenTracker treats null token counts as zero, so averageTokensPerRequest
+        // remains accurate and the request is counted.
         tokenTracker.record(entry.processId(), entry.resourceName(),
                 provider != null ? provider.name() : null,
                 responseContext.chatResponse().modelName(),
-                usage.inputTokenCount(), usage.outputTokenCount());
-        LOG.debugf("Recorded tokens for %s/%s: input=%s output=%s",
-                entry.processId(), entry.resourceName(),
-                usage.inputTokenCount(), usage.outputTokenCount());
+                usage != null ? usage.inputTokenCount() : null,
+                usage != null ? usage.outputTokenCount() : null);
+        if (usage == null) {
+            LOG.debugf("No token usage in response for %s/%s — provider may not report tokens",
+                    entry.processId(), entry.resourceName());
+        } else {
+            LOG.debugf("Recorded tokens for %s/%s: input=%s output=%s",
+                    entry.processId(), entry.resourceName(),
+                    usage.inputTokenCount(), usage.outputTokenCount());
+        }
     }
 
     @Override
