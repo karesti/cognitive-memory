@@ -72,4 +72,16 @@ public interface CognitiveProcess {
     default boolean defaultEnabled() {
         return true;
     }
+
+    /**
+     * Configure the process with arbitrary parameters.
+     * The default implementation throws UnsupportedOperationException.
+     * Processes that support runtime configuration should override this method.
+     *
+     * @param config arbitrary key/value pairs; processes interpret keys according to their own schema
+     * @throws UnsupportedOperationException if the process does not support configuration
+     */
+    default void configure(Map<String, Object> config) {
+        throw new UnsupportedOperationException("configure is not implemented for process " + id());
+    }
 }

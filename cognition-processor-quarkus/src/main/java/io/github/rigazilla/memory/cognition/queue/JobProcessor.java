@@ -103,6 +103,9 @@ public class JobProcessor {
     @Inject
     SalienceScorer salienceScorer;
 
+    @Inject
+    DurableMemoryExtractionProcess durableProcess;
+
     ManagedChannel channel;
     AdminConversationsServiceGrpc.AdminConversationsServiceBlockingStub conversationsStub;
 
@@ -334,16 +337,25 @@ public class JobProcessor {
                             r -> r,
                             (a, b) -> a));
 
-            LOG.infof("  [4/6] Verifying memory candidates");
-            String candidatesJson = objectMapper.writeValueAsString(deduplicatedCandidates);
-            DurableVerificationResponse verification = TokenTrackingContext.call(
-                    DurableMemoryExtractionProcess.PROCESS_ID, "verifier",
-                    () -> llmRetryHelper.withRetry(
-                            "verification:" + job.conversationId(),
-                            () -> verifier.verify(candidatesJson, evidenceText)));
-            LOG.infof("  ✓ Verification complete: verified=%d, rejected=%d",
-                verification.verified().size(),
-                verification.rejected().size());
+            DurableVerificationResponse verification;
+            if (durableProcess.isVerifierEnabled()) {
+                LOG.infof("  [4/6] Verifying memory candidates");
+                String candidatesJson = objectMapper.writeValueAsString(deduplicatedCandidates);
+                verification = TokenTrackingContext.call(
+                        DurableMemoryExtractionProcess.PROCESS_ID, "verifier",
+                        () -> llmRetryHelper.withRetry(
+                                "verification:" + job.conversationId(),
+                                () -> verifier.verify(candidatesJson, evidenceText)));
+                LOG.infof("  ✓ Verification complete: verified=%d, rejected=%d",
+                    verification.verified().size(),
+                    verification.rejected().size());
+            } else {
+                LOG.infof("  [4/6] Verifier disabled - skipping verification (treating all candidates as verified)");
+                verification = new DurableVerificationResponse(
+                    deduplicatedCandidates, // all verified
+                    List.of() // none rejected
+                );
+            }
 
             // Log rejected candidates with details
             if (!verification.rejected().isEmpty()) {

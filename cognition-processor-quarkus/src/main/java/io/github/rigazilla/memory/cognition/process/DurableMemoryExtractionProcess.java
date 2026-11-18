@@ -1,5 +1,6 @@
 package io.github.rigazilla.memory.cognition.process;
 
+import io.github.rigazilla.memory.cognition.config.CognitionConfig;
 import io.github.rigazilla.memory.cognition.enablement.ProcessEnablementService;
 import io.github.rigazilla.memory.cognition.event.GrpcAdminEventClient;
 import io.github.rigazilla.memory.cognition.extraction.DurableMemoryExtractor;
@@ -44,13 +45,20 @@ public class DurableMemoryExtractionProcess implements CognitiveProcess {
     @Inject
     TokenTracker tokenTracker;
 
+    @Inject
+    CognitionConfig cognitionConfig;
+
     private String extractorPrompt;
     private String verifierPrompt;
+    private volatile boolean verifierEnabled;
 
     @PostConstruct
     void init() {
         this.extractorPrompt = loadPrompt("prompts/durable-extractor-system.md");
         this.verifierPrompt = loadPrompt("prompts/durable-verifier-system.md");
+        this.verifierEnabled = cognitionConfig.durableMemoryExtraction().verifier().enabled();
+        LOG.infof("Verifier initialized as %s for process %s", 
+            verifierEnabled ? "enabled" : "disabled", id());
     }
 
     private String loadPrompt(String promptPath) {
@@ -78,7 +86,8 @@ public class DurableMemoryExtractionProcess implements CognitiveProcess {
 
     @Override
     public String description() {
-        return "Event-driven extraction, verification, and writing of durable memories";
+        String verifierStatus = verifierEnabled ? "with verification" : "without verification";
+        return "Event-driven extraction, verification, and writing of durable memories (" + verifierStatus + ")";
     }
 
     @Override
@@ -116,6 +125,7 @@ public class DurableMemoryExtractionProcess implements CognitiveProcess {
     public ManagedProcessInspection inspect() {
         JobQueueRegistry.RegistryStats stats = jobQueueRegistry.getStats();
         Map<String, Object> details = new LinkedHashMap<>();
+        details.put("verifierEnabled", verifierEnabled);
         details.put("eventStreamConnected", eventClient.isConnected());
         details.put("eventsAccepted", eventClient.getEventCount());
         details.put("activeWindows", eventClient.getWindowCount());
@@ -173,6 +183,29 @@ public class DurableMemoryExtractionProcess implements CognitiveProcess {
     public void start() {
         LOG.infof("Start requested for process %s", id());
         eventClient.startIfNeeded();
+    }
+
+    @Override
+    public void configure(Map<String, Object> config) {
+        if (config.containsKey("verifierEnabled")) {
+            Object value = config.get("verifierEnabled");
+            if (value instanceof Boolean boolValue) {
+                this.verifierEnabled = boolValue;
+                LOG.infof("Verifier %s for process %s via runtime configuration",
+                    verifierEnabled ? "enabled" : "disabled", id());
+            } else {
+                throw new IllegalArgumentException("Invalid value for 'verifierEnabled': expected Boolean but got "
+                    + (value == null ? "null" : value.getClass().getSimpleName()));
+            }
+        }
+    }
+
+    /**
+     * Check if the verifier is currently enabled.
+     * @return true if verification stage should run, false to skip it
+     */
+    public boolean isVerifierEnabled() {
+        return verifierEnabled;
     }
 
     /**

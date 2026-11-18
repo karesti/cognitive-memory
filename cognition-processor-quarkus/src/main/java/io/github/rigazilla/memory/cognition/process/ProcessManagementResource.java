@@ -110,4 +110,29 @@ public class ProcessManagementResource {
             throw new WebApplicationException(e.getMessage(), 501);
         }
     }
+
+    @POST
+    @Path("/{id}/config")
+    @Operation(summary = "Configure a process",
+        description = "Updates runtime configuration for a cognitive process. "
+            + "Each process interprets the configuration map according to its own schema. "
+            + "Unrecognised keys are silently ignored; recognised keys with invalid values are rejected.")
+    @APIResponse(responseCode = "200", description = "Process configured")
+    @APIResponse(responseCode = "400", description = "Invalid configuration value")
+    @APIResponse(responseCode = "404", description = "Process not found")
+    @APIResponse(responseCode = "501", description = "Operation not supported for this process")
+    public ManagedProcessInspection configure(
+            @Parameter(description = "Process identifier") @PathParam("id") String processId,
+            @RequestBody(description = "Configuration parameters", required = true)
+            ProcessConfigRequest body) {
+        try {
+            return manager.configure(processId, body.config());
+        } catch (NoSuchElementException e) {
+            throw new WebApplicationException(e.getMessage(), 404);
+        } catch (IllegalArgumentException e) {
+            throw new WebApplicationException(e.getMessage(), 400);
+        } catch (UnsupportedOperationException e) {
+            throw new WebApplicationException(e.getMessage(), 501);
+        }
+    }
 }

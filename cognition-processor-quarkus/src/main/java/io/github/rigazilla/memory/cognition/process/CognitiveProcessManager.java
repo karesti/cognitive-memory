@@ -45,6 +45,12 @@ public class CognitiveProcessManager {
         return process.inspect();
     }
 
+    public ManagedProcessInspection configure(String processId, Map<String, Object> config) {
+        CognitiveProcess process = getProcess(processId);
+        process.configure(config);
+        return process.inspect();
+    }
+
     private CognitiveProcess getProcess(String processId) {
         try {
             return registry.get(processId);

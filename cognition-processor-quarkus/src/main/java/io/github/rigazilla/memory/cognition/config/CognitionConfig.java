@@ -102,6 +102,10 @@ public interface CognitionConfig {
         int maxConcurrentJobs();
     }
 
+    /** Durable memory extraction settings. */
+    @WithName("durable-memory-extraction")
+    DurableMemoryExtraction durableMemoryExtraction();
+
     /** Contradiction resolution settings. */
     Contradiction contradiction();
 
@@ -281,5 +285,21 @@ public interface CognitionConfig {
 
         @WithName("password-ref")
         Optional<String> passwordRef();
+    }
+
+    /** Durable memory extraction settings sub-group. */
+    interface DurableMemoryExtraction {
+        /** Verifier settings. */
+        Verifier verifier();
+
+        /** Verifier settings. */
+        interface Verifier {
+            /**
+             * Enable/disable the verification stage (LLM-based citation checking).
+             * When disabled, all extracted candidates are treated as verified (skips LLM call).
+             */
+            @WithDefault("true")
+            boolean enabled();
+        }
     }
 }
