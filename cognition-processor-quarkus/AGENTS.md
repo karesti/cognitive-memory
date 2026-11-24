@@ -6,11 +6,40 @@ This project implements the **cognition layer** of a two-layer memory architectu
 
 ## Relation with memory-service
 
-**Memory-service** is the substrate - the source of truth for raw conversation data, entries, and access control. This project has two components:
+**Memory-service** is the substrate - the source of truth for raw conversation data, entries, and access control. This project is a **single Quarkus application** (base package `io.github.rigazilla.memory.cognition`) that talks to memory-service **only over gRPC** (default `localhost:8082`; see `MemoryServiceConfig` and `GrpcChannelFactory`):
 
-1. **Listener** (`io.github.rigazilla.memory.listener`) - **NOT the focus of this project.** This is a thin adaptation layer that bridges the reference memory-service implementation with the cognitive layer. It subscribes to memory-service event streams (SSE), receives conversation/entry events, and forwards them to the cognitive layer via REST API calls. It exists only to adapt events into HTTP requests.
+- **Inbound**: `GrpcAdminEventClient` subscribes to the memory-service admin event stream. A checkpoint (`CheckpointService`) is stored in memory-service so processing can resume after restart.
+- **Processing**: events are salience-filtered, grouped into debounce windows (`DirtyWindowRegistry`, `DebounceScheduler`), and turned into per-conversation jobs (`queue/`). `TranscriptLoader` reads the conversation context back from memory-service.
+- **Outbound**: derived memories are written back through `MemoryWriter` with provenance and citations.
+- **REST (port 8090)**: management and inspection only (`/api/processes`, `/api/events/status`, `/api/consolidate/{userId}`, `/api/memories/{id}/justify`, `/q/health`, `/q/metrics`). It is **not** a data-ingestion API; all conversation data enters through memory-service.
 
-2. **Cognitive** (`io.github.rigazilla.memory.cognitive`) - **The core focus of this project.** Business logic that processes events to extract topics, detect patterns, and create derived memories. It calls back to memory-service APIs to read full conversation context and can be deployed as a standalone service. This is where the actual cognition work happens.
+> Older revisions of this file described a separate `listener` package (SSE → REST) and a `cognitive` package. Neither exists; do not look for them.
+
+### Package map
+
+| Package | Responsibility |
+|---|---|
+| `event`, `queue`, `evidence` | Event stream, salience, debounce, checkpoint, job queue, transcript loading |
+| `extraction`, `verification` | LLM-backed durable memory extraction and citation verification |
+| `consolidation`, `contradiction` | Duplicate detection/merging; contradiction detection and resolution (batch and on-insert) |
+| `profile`, `metadata`, `temporal`, `justify` | Profile snapshots, metadata/temporal enrichment, memory justification |
+| `storeall` | Verbatim "store everything" baseline process (benchmark use) |
+| `process`, `enablement` | Managed process registry, management API, enable/disable policy |
+| `resource`, `config`, `token` | LLM/API resource config, retry helper, typed config, token tracking |
+
+### Managed processes (registered in `CognitiveProcessManager`)
+
+| ID | Trigger | `/start` | `/enable`, `/disable` | Default |
+|---|---|---|---|---|
+| `durable-memory-extraction` | Event-driven (debounced) | yes | yes | Enabled |
+| `contradiction-on-insert` | On every memory write | no | yes | Enabled |
+| `contradiction-resolution` | Manual batch backfill | yes | yes | Enabled |
+| `profile-context-consolidation` | Manual only, via `POST /api/consolidate/{userId}` | no | no | Always on |
+| `metadata-enrichment` | Manual backfill | yes | no | Always on |
+| `temporal-metadata-enrichment` | Manual backfill | yes | no | Always on |
+| `store-all` | Event-driven, no LLM | no | yes | **Disabled** |
+
+Use `GET /api/processes` for the authoritative live list; this table can drift. Support flags come from `supportsStart/Enable/Disable()` on each `CognitiveProcess`.
 
 ## Goals
 
@@ -136,7 +165,7 @@ Java code must pass **Checkstyle** and **SpotBugs** checks configured in the pro
 
 Run `./mvnw -B checkstyle:check spotbugs:check` before submitting changes. Both checks run automatically in CI on pull requests.
 
-**Code Coverage** is collected via **JaCoCo**. Target thresholds (not yet enforced): 80% line coverage, 70% branch coverage. Run `./mvnw -B test jacoco:report` to generate a coverage report, then open `target/site/jacoco/index.html` to view it.
+**Code Coverage** is collected via **JaCoCo**. `pom.xml` defines a minimum of 15% line / 10% branch coverage at the `verify` phase (`check-coverage` execution), and CI's PR coverage comment uses minimums of 35% overall / 50% on changed files (see [`.github/SETUP.md`](../.github/SETUP.md)); the long-term targets are 80% line / 70% branch. Run `./mvnw -B test jacoco:report` to generate a coverage report, then open `target/site/jacoco/index.html` to view it.
 
 ## Documentation
 
@@ -151,4 +180,6 @@ Never read, print, summarize, parse, or transmit the `.env` file. It may contain
 
 When a new feature is implemented and complete a design description document must be created in the DONE folder. Files there must be prefixed with "NNN-" where NNN is an increasing number.
 
-Future work items, research tasks, and ideas are tracked in the TODO folder as individual markdown files. TODO documents should be written to be AI assistant friendly.
+Future work items, research tasks, and ideas are tracked in the TODO folder as individual markdown files. TODO documents should be written to be AI assistant friendly. When a TODO item is completed, move or replace it with a DONE document and remove the TODO file so [TODO/README.md](TODO/README.md) stays accurate.
+
+User-facing behaviour changes (new process, config key, REST endpoint, default value) must also update the user docs in the same change: the [processor README](README.md), the process table above, and the site docs under `../site/src/pages/docs/`. REST changes regenerate `site/public/openapi.*` (see [site/README.md](../site/README.md)).

@@ -17,12 +17,27 @@ Shared logic called by both CI and CD. Not triggered directly.
   - Test container health check (`/q/health/live`)
   - Optionally push image to Quay.io
 
+### Build and Test (`.github/workflows/quarkus-build-and-test.yml`)
+
+Reusable workflow (`workflow_call`) called by CI. It builds and runs `./mvnw test` on `ubuntu-latest` and `macos-latest` (JDK 21). On Linux only it also:
+- generates the JaCoCo report and posts a PR coverage summary (`Madrapps/jacoco-report`, minimums: 35% overall, 50% on changed files)
+- runs `checkstyle:checkstyle` and `spotbugs:spotbugs`
+
+Note: CI runs the `test` phase, not `verify`, so the 15% line / 10% branch `check-coverage` rule in `pom.xml` is only enforced when running `./mvnw verify` locally. See [`cognition-processor-quarkus/AGENTS.md`](../cognition-processor-quarkus/AGENTS.md).
+
 ### CI Workflow (`.github/workflows/ci.yml`)
-- **Trigger**: Push to `main` branch, pull requests targeting `main`
+- **Trigger**: Pull requests targeting `main`
 - **Jobs**:
-  - Build application with Maven
-  - Run unit tests
-  - Call reusable workflow with `push: false` (build + health check only, no registry push)
+  - Call `quarkus-build-and-test.yml` (build + unit tests)
+  - Call the reusable Docker workflow with `push: false` (build + health check only, no registry push)
+
+### OpenAPI Sync Check (`.github/workflows/verify-openapi.yml`)
+- **Trigger**: Pull requests targeting `main` (path-filtered)
+- **Purpose**: Fails if the checked-in `site/public/openapi.json|yaml` differs from what the Quarkus build generates. Regenerate with `./mvnw compile quarkus:build -DskipTests` in `cognition-processor-quarkus/` (see [`site/README.md`](../site/README.md)).
+
+### Site Deployment (`.github/workflows/deploy-site.yml`)
+- **Trigger**: Push to `main` (path-filtered)
+- **Purpose**: Builds the Astro site in `site/` and deploys it to GitHub Pages.
 
 ### CD Workflow (`.github/workflows/cd.yml`)
 - **Trigger**: Push to `main` branch

@@ -30,8 +30,8 @@ ollama list
 Pull and start Ollama in a container:
 
 ```bash
-# Start Ollama container
-docker run -d -p 11434:11434 --name ollama ollama/ollama:latest
+# Start Ollama container (named volume keeps pulled models across container re-creation)
+docker run -d -p 11434:11434 -v ollama-data:/root/.ollama --name ollama ollama/ollama:latest
 
 # Pull required models
 docker exec ollama ollama pull qwen2.5:1.5b

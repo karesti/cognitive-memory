@@ -55,16 +55,26 @@ The env.example file contains these core variables:
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
-| `MEMORY_SERVICE_API_KEY` | Auth for memory-service | `cognition-processor-key-123` |
+| `MEMORY_SERVICE_API_KEY` | Auth for memory-service (required, no default) | `cognition-processor-key-123` |
+| `COGNITION_MEMORY_MODEL_PROVIDER` | LLM provider for extraction/verification (`openai` default, `ollama`, `vertex-ai-gemini`) | `openai` |
 | `COGNITION_OPENAI_BASE_URL` | LLM endpoint | `https://api.openai.com/v1` |
 | `COGNITION_OPENAI_API_KEY` | OpenAI API key | `<your-api-key>` |
-| `COGNITION_OPENAI_MODEL` | Model for chat | `gpt-4o` |
-| `COGNITION_OPENAI_MODEL_NAME` | Model for extraction | `gpt-4o` |
-| `MEMORY_SERVICE_EMBEDDING_*` | Embedding config | For memory-service |
+| `COGNITION_OPENAI_MODEL_NAME` | Model for extraction/verification | `gpt-4o` |
+| `OPENAI_*`, `MEMORY_SERVICE_EMBEDDING_*` | Used by the memory-service stack (chat sample app, embeddings), not by the processor | — |
 
-**Note**: Replace all `<your-api-key>` placeholders with your actual OpenAI API keys before running.
+**Note**: Replace all `<your-api-key>` placeholders with your actual keys before running. The contradiction detector uses its own LLM settings (`cognition.contradiction.llm.*`, default Ollama `llama3.2`), independent of the `memory` model above. Point it at a reachable LLM or disable the contradiction processes if you do not run Ollama.
 
 ## Currently Implemented Processes
+
+`GET /api/processes` is the authoritative list. This guide walks through the two main ones; the others are:
+
+| Process ID | What it does | How to use |
+|---|---|---|
+| `contradiction-on-insert` | Checks each newly written memory against semantically close existing memories and resolves contradictions (marks superseded) | Automatic; `POST /api/processes/contradiction-on-insert/disable` to turn off |
+| `contradiction-resolution` | Batch pass over existing memories per namespace | `POST /api/processes/contradiction-resolution/start` |
+| `metadata-enrichment` | Adds entity/topic metadata to existing memories | `POST /api/processes/metadata-enrichment/start` |
+| `temporal-metadata-enrichment` | Backfills `observed_at` / `effective_at` | `POST /api/processes/temporal-metadata-enrichment/start` |
+| `store-all` | Stores every entry verbatim, no LLM (benchmark baseline); **disabled by default** | `POST /api/processes/store-all/enable` |
 
 ### 1. Durable Memory Extraction (Automatic)
 
@@ -89,7 +99,9 @@ The env.example file contains these core variables:
 
 ### 1. Start Both Services
 
-**Option A: Using Docker Compose Profile (Easiest)**
+**Option A: Using Docker Compose Profile**
+
+> Unverified: this relies on a `cognition` Docker Compose profile in the memory-service repository. If `docker compose --profile cognition up` does not start the processor, use Option B.
 
 Start both services together with a single command:
 ```bash
@@ -420,8 +432,8 @@ cognition.scheduler.max-batch-entries=24
 # Concurrency
 cognition.scheduler.max-concurrent-jobs=8
 
-# LLM timeout
-quarkus.langchain4j.ollama.timeout=60s
+# LLM timeout (named model "memory"; use quarkus.langchain4j.openai.memory.timeout for OpenAI)
+quarkus.langchain4j.ollama.memory.timeout=60s
 ```
 
 ## Port Reference
@@ -434,9 +446,9 @@ quarkus.langchain4j.ollama.timeout=60s
 | Ollama | 11434 | LLM inference |
 
 ## Known Limitations
-- No retry logic (transient failures are lost)
-- No consolidation (duplicates possible)
-- No salience filtering (all events processed)
+- Only individual LLM calls are retried (`cognition.llm.retry.*`). A job that still fails is logged and dropped (no job-level retry or dead-letter queue).
+- Salience filtering is on by default, so greetings and filler are dropped. If your test messages are very short (under `salience.min-length`, default 10 chars) or generic, they may produce no memories; see the README "Salience filtering" section or set `salience.enabled=false` for testing.
+- Profile consolidation is manual only (no scheduled run).
 - Authentication requires conversation membership
 
 ## Testing Profile Consolidation

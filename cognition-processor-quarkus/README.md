@@ -14,18 +14,28 @@ Think of it as the "intelligence" that turns raw conversation transcripts into s
 
 ### Prerequisites
 - Java 21+
-- Maven 3.9+
+- Maven 3.9+ (or use the bundled `./mvnw`)
 - Memory Service running - see [../memory-service](../memory-service) for local setup instructions
+- An LLM endpoint: OpenAI-compatible API key (default) or a local Ollama
 
 ### Run It
 
-1. **Start the cognition processor**:
+1. **Create your environment file** (Quarkus reads `.env` from the working directory; it is git-ignored):
+   ```bash
+   cp env.example .env
+   ```
+   Then edit `.env`. At minimum:
+   - `MEMORY_SERVICE_API_KEY` - API key the processor uses to talk to memory-service (no default; startup fails without it). The value in `env.example` is the quickstart key; it must match a key configured in your memory-service instance.
+   - `COGNITION_OPENAI_API_KEY` - needed with the default `openai` provider.
+   - To use Ollama instead, set `COGNITION_MEMORY_MODEL_PROVIDER=ollama`.
+
+2. **Start the cognition processor**:
    ```bash
    ./mvnw quarkus:dev
    ```
 
-2. **Verify it's running**:
-   - Check logs for "Started AdminEventClient - connected to memory-service"
+3. **Verify it's running**:
+   - Check logs for "Successfully connected to gRPC event stream" and "Subscribed to admin event stream"
    - Health checks:
      - Liveness: http://localhost:8090/q/health/live
      - Readiness: http://localhost:8090/q/health/ready (includes gRPC connection status)
@@ -48,14 +58,18 @@ See [AGENTS.md](./AGENTS.md) for architecture details and [Enhancement 099](http
 
 ## Configuration
 
-Default configuration works with local development setup. Key settings in `src/main/resources/application.properties`:
+Defaults target a local development setup (memory-service on `localhost:8082`, processor on port `8090`), but you must supply the secrets listed under [Run It](#run-it). Key settings in `src/main/resources/application.properties`:
 - Memory Service connection: `memory-service.grpc.host` / `memory-service.grpc.port`
-- LLM provider: `quarkus.langchain4j.*.chat-model.provider` (default: Ollama)
-- Models: `memory` model for extraction/verification, `topic-summary` for summaries
+- LLM provider for the `memory` model (extraction/verification): `quarkus.langchain4j.memory.chat-model.provider`, set through `COGNITION_MEMORY_MODEL_PROVIDER` (default: `openai`; alternatives: `ollama`, `vertex-ai-gemini`)
+- OpenAI settings: `COGNITION_OPENAI_BASE_URL`, `COGNITION_OPENAI_API_KEY`, `COGNITION_OPENAI_MODEL_NAME` (default `gpt-4o`)
+- Debounce and batching: `cognition.scheduler.*` (default: 1 minute quiet period, 5 minute max age, 24 entries per batch, 8 concurrent jobs)
+- LLM retries: `cognition.llm.retry.*`
+- Contradiction detection LLM: `cognition.contradiction.llm.*` (default: Ollama `llama3.2`; independent of the `memory` model)
+- Verification stage: `cognition.durable-memory-extraction.verifier.enabled`
 
-Environment variable examples:
-- `env.example` for local host-based runs
-- `env.example` for both local and Docker-based runs
+All `cognition.*` and `memory-service.*` keys are typed in [`CognitionConfig`](src/main/java/io/github/rigazilla/memory/cognition/config/CognitionConfig.java) and [`MemoryServiceConfig`](src/main/java/io/github/rigazilla/memory/cognition/config/MemoryServiceConfig.java), which document each key and default.
+
+Environment variable template: [`env.example`](env.example) (used for both local runs and Docker; copy to `.env` for local, `.env.docker` for Docker Compose).
 
 ### Salience filtering
 
@@ -127,13 +141,14 @@ A JVM-based Docker setup is included for local integration testing.
 ```
 
 ### Configure Docker runtime
+`docker-compose.yml` reads `.env.docker` (git-ignored):
 ```bash
-cp env.example .env
+cp env.example .env.docker
 ```
 
 Then edit `.env.docker` as needed:
-- set `OPENAI_API_KEY` if using the default OpenAI-compatible memory model configuration
-- or switch the memory model provider to Ollama by editing `env.example`
+- set `COGNITION_OPENAI_API_KEY` if using the default `openai` provider
+- or set `COGNITION_MEMORY_MODEL_PROVIDER=ollama` to use the host Ollama
 
 ### Start the container
 ```bash
@@ -161,19 +176,25 @@ tail -f logs/quarkus.log
 
 ## Project Status
 
-**Currently Implemented** (see [DONE/](./DONE/) folder for details):
-- ✅ gRPC event stream client
-- ✅ Debounce windows and batching
-- ✅ Job processing pipeline
-- ✅ Memory extraction (5 types: fact, preference, procedure, problem_solution, decision)
-- ✅ Citation verification
-- ✅ Provenance tracking
+**Currently Implemented** (design notes in [DONE/](./DONE/)):
+- ✅ gRPC event stream client with checkpointing (stored in memory-service)
+- ✅ Salience filtering, debounce windows and batching
+- ✅ Job processing pipeline with per-conversation queues
+- ✅ Durable memory extraction (5 types: fact, preference, procedure, problem_solution, decision) with citation verification (can be disabled)
+- ✅ Provenance tracking and memory justification API
+- ✅ Contradiction detection and resolution (on insert, and batch backfill)
+- ✅ Duplicate detection and merging of extracted memories (`ConsolidationService`, run in the job pipeline)
+- ✅ Profile context consolidation (manual trigger)
+- ✅ Metadata and temporal metadata enrichment (manual backfill)
+- ✅ `store-all` verbatim baseline process (disabled by default; type `verbatim`)
+- ✅ Process management API (list/inspect/start/enable/disable/config)
+- ✅ LLM retry with backoff, token usage tracking, health and metrics endpoints
 
-**Not Yet Implemented** (see [TODO/](./TODO/) folder):
-- ❌ Memory consolidation (deduplication, merging)
+**Not Yet Implemented / Open** (see [TODO/](./TODO/) for the current list):
+- ❌ Job-level retry / dead-letter handling (only individual LLM calls are retried)
 - ❌ Topic summary extraction
-- ❌ Cache-only notes (bridge, topic)
-- ❌ Prompt caching optimization
+- ❌ Scheduled (nightly) profile consolidation
+- ❌ Cache-only notes (bridge, topic) and prompt caching optimization
 
 ## For New Contributors
 
@@ -186,7 +207,8 @@ tail -f logs/quarkus.log
 ### About This Project
 - [AGENTS.md](./AGENTS.md) - Project overview and guidelines for AI assistants
 - [Enhancement 099](https://github.com/chirino/memory-service/blob/main/docs/enhancements/099-quarkus-cognition-processor.md) - Implementation specification
-- [TODO/gap-analysis-model-backed-extraction.md](./TODO/gap-analysis-model-backed-extraction.md) - Current vs spec comparison
+- [docs/testing-guide.md](./docs/testing-guide.md) - Hands-on end-to-end walkthrough with curl
+- [API reference site](../site/README.md) - OpenAPI-based docs (`site/`)
 
 ### About Memory Service
 - [Memory Service Repository](https://github.com/chirino/memory-service)
