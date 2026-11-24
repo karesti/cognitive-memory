@@ -70,12 +70,14 @@ Explain to the user what the system does:
 
 **Check extracted memories:**
 ```bash
-curl -X POST http://localhost:8082/v1/memories/search \
-  -H "Authorization: Bearer cognition-processor-key-123" \
+curl -X POST http://localhost:8082/admin/v1/memories/search \
   -H "X-API-Key: cognition-processor-key-123" \
   -H "Content-Type: application/json" \
   -d '{"namespace_prefix": ["user"]}'
 ```
+
+Send the API key in `X-API-Key` only. A memory-service with OIDC enabled (its default compose) rejects
+`Authorization: Bearer <api-key>` because the value is not a JWT.
 
 Initially returns `{"items":[]}`, but after conversations with salient content, extracted memories will appear.
 

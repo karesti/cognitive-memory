@@ -138,13 +138,19 @@ The cognition processor will automatically:
 
 **Option B: Use the API Directly**
 
-All these commands target **memory-service** (port 8082), not the cognition processor:
+All these commands target **memory-service** (port 8082), not the cognition processor.
+
+Authentication: send the API key in `X-API-Key` **only**. Do not add `Authorization: Bearer <api-key>`:
+a memory-service with OIDC enabled (the default in its `compose.yaml`) rejects a non-JWT bearer token.
+`cognition-processor-key-123` is the quickstart key of the `cognition_processor` client. That client is
+trusted to assert a user with `X-User-ID`, which the user-scoped `/v1/...` endpoints need
+(`MEMORY_SERVICE_TRUSTED_USER_ID_CLIENTS`). The admin endpoints (`/admin/v1/...`) need no user.
 
 ```bash
 # 1. Create a conversation in memory-service
 CONV_ID=$(curl -s -X POST http://localhost:8082/v1/conversations \
-  -H "X-API-Key: admin-api-key-1" \
-  -H "Authorization: Bearer admin-api-key-1" \
+  -H "X-API-Key: cognition-processor-key-123" \
+  -H "X-User-ID: alice" \
   -H "Content-Type: application/json" \
   -d '{
     "title": "Performance Test",
@@ -155,8 +161,8 @@ echo "Created conversation: $CONV_ID"
 
 # 2. Add entries to the conversation (triggers cognition processing)
 curl -X POST http://localhost:8082/v1/conversations/$CONV_ID/entries \
-  -H "X-API-Key: admin-api-key-1" \
-  -H "Authorization: Bearer admin-api-key-1" \
+  -H "X-API-Key: cognition-processor-key-123" \
+  -H "X-User-ID: alice" \
   -H "Content-Type: application/json" \
   -d '{
     "channel": "HISTORY",
@@ -216,8 +222,8 @@ After ~70 seconds (60s debounce + ~10s processing), check memory-service for ext
 ```bash
 # Search for all memories extracted by cognition processor
 curl -X POST http://localhost:8082/v1/memories/search \
-  -H "Authorization: Bearer admin-api-key-1" \
-  -H "X-API-Key: admin-api-key-1" \
+  -H "X-API-Key: cognition-processor-key-123" \
+  -H "X-User-ID: alice" \
   -H "Content-Type: application/json" \
   -d '{"namespace_prefix": ["user", "alice", "cognition.v1"]}' | jq
 ```
@@ -248,8 +254,8 @@ After consolidation, check the profile snapshot in memory-service:
 ```bash
 # Search for profile context snapshot
 curl -X POST http://localhost:8082/v1/memories/search \
-  -H "Authorization: Bearer admin-api-key-1" \
-  -H "X-API-Key: admin-api-key-1" \
+  -H "X-API-Key: cognition-processor-key-123" \
+  -H "X-User-ID: alice" \
   -H "Content-Type: application/json" \
   -d '{"namespace_prefix": ["user", "alice", "cognition.v1", "profile_context"]}' | jq
 ```
@@ -312,16 +318,16 @@ Expected response structure for profile snapshot:
 # Create 100 conversations with 10 entries each
 for i in {1..100}; do
   CONV_ID=$(curl -s -X POST http://localhost:8082/v1/conversations \
-    -H "X-API-Key: admin-api-key-1" \
-    -H "Authorization: Bearer admin-api-key-1" \
+    -H "X-API-Key: cognition-processor-key-123" \
+    -H "X-User-ID: alice" \
     -H "Content-Type: application/json" \
     -d "{\"title\": \"Test $i\", \"members\": [{\"userId\": \"alice\", \"role\": \"OWNER\"}]}" \
     | jq -r '.id')
   
   # Add entries
   curl -s -X POST http://localhost:8082/v1/conversations/$CONV_ID/entries \
-    -H "X-API-Key: admin-api-key-1" \
-    -H "Authorization: Bearer admin-api-key-1" \
+    -H "X-API-Key: cognition-processor-key-123" \
+    -H "X-User-ID: alice" \
     -H "Content-Type: application/json" \
     -d '{"channel": "HISTORY", "content": [{"role": "user", "text": "Test message '$i'"}]}' > /dev/null
 done
@@ -440,16 +446,16 @@ quarkus.langchain4j.ollama.timeout=60s
 ```bash
 # 1. Create conversation with rich content
 CONV_ID=$(curl -s -X POST http://localhost:8082/v1/conversations \
-  -H "X-API-Key: admin-api-key-1" \
-  -H "Authorization: Bearer admin-api-key-1" \
+  -H "X-API-Key: cognition-processor-key-123" \
+  -H "X-User-ID: alice" \
   -H "Content-Type: application/json" \
   -d '{"title": "Profile Test", "members": [{"userId": "alice", "role": "OWNER"}]}' \
   | jq -r '.id')
 
 # 2. Add multiple entries with different memory types
 curl -X POST http://localhost:8082/v1/conversations/$CONV_ID/entries \
-  -H "X-API-Key: admin-api-key-1" \
-  -H "Authorization: Bearer admin-api-key-1" \
+  -H "X-API-Key: cognition-processor-key-123" \
+  -H "X-User-ID: alice" \
   -H "Content-Type: application/json" \
   -d '{
     "channel": "HISTORY",
@@ -469,8 +475,8 @@ sleep 70
 # 4. Verify memories were extracted
 echo "Checking extracted memories..."
 MEMORY_COUNT=$(curl -s -X POST http://localhost:8082/v1/memories/search \
-  -H "Authorization: Bearer admin-api-key-1" \
-  -H "X-API-Key: admin-api-key-1" \
+  -H "X-API-Key: cognition-processor-key-123" \
+  -H "X-User-ID: alice" \
   -H "Content-Type: application/json" \
   -d '{"namespace_prefix": ["user", "alice", "cognition.v1"]}' \
   | jq '.items | length')
@@ -484,8 +490,8 @@ curl -X POST http://localhost:8090/api/consolidate/alice \
 # 6. Verify profile snapshot was created
 echo "Checking profile snapshot..."
 curl -s -X POST http://localhost:8082/v1/memories/search \
-  -H "Authorization: Bearer admin-api-key-1" \
-  -H "X-API-Key: admin-api-key-1" \
+  -H "X-API-Key: cognition-processor-key-123" \
+  -H "X-User-ID: alice" \
   -H "Content-Type: application/json" \
   -d '{"namespace_prefix": ["user", "alice", "cognition.v1", "profile_context"]}' \
   | jq '.items[0].value.content'
@@ -501,8 +507,8 @@ Test how well the consolidation handles different memory types:
 
 # Check consolidation quality
 curl -s -X POST http://localhost:8082/v1/memories/search \
-  -H "Authorization: Bearer admin-api-key-1" \
-  -H "X-API-Key: admin-api-key-1" \
+  -H "X-API-Key: cognition-processor-key-123" \
+  -H "X-User-ID: alice" \
   -H "Content-Type: application/json" \
   -d '{"namespace_prefix": ["user", "alice", "cognition.v1", "profile_context"]}' \
   | jq '.items[0].value | {
@@ -530,8 +536,8 @@ curl -s http://localhost:8090/api/processes/profile-context-consolidation | jq -
 echo ""
 echo "2. Creating test conversation..."
 CONV_ID=$(curl -s -X POST http://localhost:8082/v1/conversations \
-  -H "X-API-Key: admin-api-key-1" \
-  -H "Authorization: Bearer admin-api-key-1" \
+  -H "X-API-Key: cognition-processor-key-123" \
+  -H "X-User-ID: alice" \
   -H "Content-Type: application/json" \
   -d '{"title": "Quick Test", "members": [{"userId": "alice", "role": "OWNER"}]}' \
   | jq -r '.id')
@@ -540,8 +546,8 @@ echo "  Created: $CONV_ID"
 echo ""
 echo "3. Adding test entry..."
 curl -s -X POST http://localhost:8082/v1/conversations/$CONV_ID/entries \
-  -H "X-API-Key: admin-api-key-1" \
-  -H "Authorization: Bearer admin-api-key-1" \
+  -H "X-API-Key: cognition-processor-key-123" \
+  -H "X-User-ID: alice" \
   -H "Content-Type: application/json" \
   -d '{"channel": "HISTORY", "content": [{"role": "user", "text": "I work at Acme Corp"}]}' > /dev/null
 echo "  ✓ Entry added"
@@ -553,8 +559,8 @@ sleep 70
 echo ""
 echo "5. Checking for extracted memories..."
 MEMORY_COUNT=$(curl -s -X POST http://localhost:8082/v1/memories/search \
-  -H "Authorization: Bearer admin-api-key-1" \
-  -H "X-API-Key: admin-api-key-1" \
+  -H "X-API-Key: cognition-processor-key-123" \
+  -H "X-User-ID: alice" \
   -H "Content-Type: application/json" \
   -d '{"namespace_prefix": ["user", "alice", "cognition.v1"]}' \
   | jq '.items | length')
@@ -569,8 +575,8 @@ echo "  ✓ Consolidation status: $CONSOLIDATION_RESULT"
 echo ""
 echo "7. Verifying profile snapshot..."
 PROFILE_EXISTS=$(curl -s -X POST http://localhost:8082/v1/memories/search \
-  -H "Authorization: Bearer admin-api-key-1" \
-  -H "X-API-Key: admin-api-key-1" \
+  -H "X-API-Key: cognition-processor-key-123" \
+  -H "X-User-ID: alice" \
   -H "Content-Type: application/json" \
   -d '{"namespace_prefix": ["user", "alice", "cognition.v1", "profile_context"]}' \
   | jq '.items | length')
